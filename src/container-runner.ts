@@ -261,14 +261,32 @@ async function buildContainerArgs(
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    // Fall back to passing ANTHROPIC_AUTH_TOKEN from the host environment.
+    // This covers setups where a local proxy (e.g. LiteLLM) handles auth and
+    // only needs a placeholder key to satisfy the Claude agent SDK.
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    if (authToken) {
+      args.push('-e', `ANTHROPIC_API_KEY=${authToken}`);
+      logger.info({ containerName }, 'Using ANTHROPIC_AUTH_TOKEN as fallback API key');
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable — container will have no credentials',
+      );
+    }
   }
 
   // Runtime-specific args for host gateway resolution
-  args.push(...hostGatewayArgs());
+  args.push(...hostGatewayArgs())
+
+    // Pass the local LiteLLM endpoint to the container
+    const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL;
+    if (ANTHROPIC_BASE_URL) {
+      args.push('-e', `ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}`);
+      if (ANTHROPIC_BASE_URL.includes('host.docker.internal')) {
+        args.push('-e', 'NO_PROXY=host.docker.internal,127.0.0.1,localhost');
+      }
+    };
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

@@ -3,6 +3,7 @@ import {
   Events,
   GatewayIntentBits,
   Message,
+  Partials,
   TextChannel,
 } from 'discord.js';
 
@@ -43,12 +44,56 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
       ],
+      partials: [Partials.Channel, Partials.Message, Partials.User],
+    });
+
+    // discord.js v14 silently drops MessageCreate for DM channels: partial DM channels
+    // lack a type field so isTextBased() returns false. Handle DMs via the raw gateway
+    // event instead, which always fires regardless of channel cache state.
+    this.client.on('raw', async (event: { t: string; d: Record<string, unknown> }) => {
+      if (event.t !== 'MESSAGE_CREATE') return;
+      const data = event.d;
+      if (data.guild_id) return; // guild messages are handled by MessageCreate
+
+      const author = data.author as { id: string; username: string; global_name?: string; bot?: boolean } | null;
+      if (!author || author.bot) return;
+
+      const channelId = data.channel_id as string;
+      const chatJid = `dc:${channelId}`;
+      const content = (data.content as string) || '';
+      const timestamp = data.timestamp as string;
+      const senderName = author.global_name || author.username;
+      const sender = author.id;
+      const msgId = data.id as string;
+
+      logger.info({ chatJid }, 'Discord DM received');
+
+      this.opts.onChatMetadata(chatJid, new Date(timestamp).toISOString(), senderName, 'discord', false);
+
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) {
+        logger.debug({ chatJid, senderName }, 'DM from unregistered Discord channel');
+        return;
+      }
+
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content,
+        timestamp: new Date(timestamp).toISOString(),
+        is_from_me: false,
+      });
+
+      logger.info({ chatJid, sender: senderName }, 'Discord DM stored');
     });
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
       // Ignore bot messages (including own)
-      if (message.author.bot) return;
-
+      if (!message.author || message.author.bot) return;
+      // DMs are handled by the raw event handler above
+      if (!message.guild) return;
       const channelId = message.channelId;
       const chatJid = `dc:${channelId}`;
       let content = message.content;
