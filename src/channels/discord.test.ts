@@ -196,7 +196,7 @@ function createReaction(overrides: {
   channelId?: string;
   messageId?: string;
   emojiName?: string;
-  messageBotId?: string;   // author ID of the reacted-to message (default: bot's own ID)
+  messageBotId?: string; // author ID of the reacted-to message (default: bot's own ID)
   isPartial?: boolean;
   messageIsPartial?: boolean;
 }) {
@@ -300,7 +300,9 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       expect(currentClient().eventHandlers.has('messageCreate')).toBe(true);
-      expect(currentClient().eventHandlers.has('messageReactionAdd')).toBe(true);
+      expect(currentClient().eventHandlers.has('messageReactionAdd')).toBe(
+        true,
+      );
       expect(currentClient().eventHandlers.has('error')).toBe(true);
       expect(currentClient().eventHandlers.has('ready')).toBe(true);
     });
@@ -720,7 +722,10 @@ describe('DiscordChannel', () => {
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      const reaction = createReaction({ emojiName: '👍', messageId: 'bot_msg_001' });
+      const reaction = createReaction({
+        emojiName: '👍',
+        messageId: 'bot_msg_001',
+      });
       const user = createReactionUser({});
       await triggerReaction(reaction, user);
 
@@ -872,7 +877,10 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       const reaction = createReaction({ emojiName: '👍' });
-      const user = createReactionUser({ isPartial: true, displayName: 'Alice' });
+      const user = createReactionUser({
+        isPartial: true,
+        displayName: 'Alice',
+      });
       await triggerReaction(reaction, user);
 
       expect(user.fetch).toHaveBeenCalled();
