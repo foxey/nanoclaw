@@ -189,14 +189,14 @@ export class DiscordChannel implements Channel {
           new Date(timestamp).toISOString(),
           senderName,
           'discord',
-          false
+          false,
         );
 
         const group = this.opts.registeredGroups()[chatJid];
         if (!group) {
           logger.debug(
             { chatJid, senderName },
-            'DM from unregistered Discord channel'
+            'DM from unregistered Discord channel',
           );
           return;
         }
@@ -212,7 +212,7 @@ export class DiscordChannel implements Channel {
         });
 
         logger.info({ chatJid, sender: senderName }, 'Discord DM stored');
-      }
+      },
     );
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
@@ -277,7 +277,7 @@ export class DiscordChannel implements Channel {
             } else {
               return `[File: ${att.name || 'file'}]`;
             }
-          }
+          },
         );
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
@@ -290,7 +290,7 @@ export class DiscordChannel implements Channel {
       if (message.reference?.messageId) {
         try {
           const repliedTo = await message.channel.messages.fetch(
-            message.reference.messageId
+            message.reference.messageId,
           );
           const replyAuthor =
             repliedTo.member?.displayName ||
@@ -309,7 +309,7 @@ export class DiscordChannel implements Channel {
         timestamp,
         chatName,
         'discord',
-        isGroup
+        isGroup,
       );
 
       // Only deliver full message for registered groups
@@ -317,7 +317,7 @@ export class DiscordChannel implements Channel {
       if (!group) {
         logger.debug(
           { chatJid, chatName },
-          'Message from unregistered Discord channel'
+          'Message from unregistered Discord channel',
         );
         return;
       }
@@ -335,7 +335,7 @@ export class DiscordChannel implements Channel {
 
       logger.info(
         { chatJid, chatName, sender: senderName },
-        'Discord message stored'
+        'Discord message stored',
       );
     });
 
@@ -345,7 +345,7 @@ export class DiscordChannel implements Channel {
       Events.MessageReactionAdd,
       async (
         reaction: MessageReaction | PartialMessageReaction,
-        user: User | PartialUser
+        user: User | PartialUser,
       ) => {
         // Ignore reactions from bots (including self)
         if (user.bot) return;
@@ -399,7 +399,7 @@ export class DiscordChannel implements Channel {
 
         logger.info(
           { chatJid, emoji: emojiName, approvalText, sender: senderName },
-          'Discord reaction approval received'
+          'Discord reaction approval received',
         );
 
         // Synthesise as a regular message — include reply_to_message_id so the
@@ -414,7 +414,7 @@ export class DiscordChannel implements Channel {
           is_from_me: false,
           reply_to_message_id: message.id,
         });
-      }
+      },
     );
 
     // Handle errors gracefully
@@ -426,11 +426,11 @@ export class DiscordChannel implements Channel {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
-          'Discord bot connected'
+          'Discord bot connected',
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
         console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`
+          `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
         resolve();
       });
