@@ -69,7 +69,12 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
       ],
-      partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
+      partials: [
+        Partials.Channel,
+        Partials.Message,
+        Partials.Reaction,
+        Partials.User,
+      ],
     });
 
     // discord.js v14 silently drops MessageCreate for DM channels: partial DM channels
