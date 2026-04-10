@@ -115,7 +115,7 @@ import { DiscordChannel, DiscordChannelOpts } from './discord.js';
 // --- Test helpers ---
 
 function createTestOpts(
-  overrides?: Partial<DiscordChannelOpts>,
+  overrides?: Partial<DiscordChannelOpts>
 ): DiscordChannelOpts {
   return {
     onMessage: vi.fn(),
@@ -322,7 +322,7 @@ describe('DiscordChannel', () => {
 
       expect(currentClient().eventHandlers.has('messageCreate')).toBe(true);
       expect(currentClient().eventHandlers.has('messageReactionAdd')).toBe(
-        true,
+        true
       );
       expect(currentClient().eventHandlers.has('error')).toBe(true);
       expect(currentClient().eventHandlers.has('ready')).toBe(true);
@@ -367,7 +367,7 @@ describe('DiscordChannel', () => {
         expect.any(String),
         'Test Server #general',
         'discord',
-        true,
+        true
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
@@ -378,7 +378,7 @@ describe('DiscordChannel', () => {
           sender_name: 'Alice',
           content: 'Hello everyone',
           is_from_me: false,
-        }),
+        })
       );
     });
 
@@ -399,7 +399,7 @@ describe('DiscordChannel', () => {
         expect.any(String),
         expect.any(String),
         'discord',
-        true,
+        true
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -431,7 +431,7 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ sender_name: 'Alice Nickname' }),
+        expect.objectContaining({ sender_name: 'Alice Nickname' })
       );
     });
 
@@ -450,7 +450,7 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ sender_name: 'Alice Global' }),
+        expect.objectContaining({ sender_name: 'Alice Global' })
       );
     });
 
@@ -480,7 +480,7 @@ describe('DiscordChannel', () => {
         expect.any(String),
         'Alice',
         'discord',
-        false,
+        false
       );
     });
 
@@ -501,7 +501,7 @@ describe('DiscordChannel', () => {
         expect.any(String),
         'My Server #bot-chat',
         'discord',
-        true,
+        true
       );
     });
   });
@@ -525,7 +525,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '@Andy what time is it?',
-        }),
+        })
       );
     });
 
@@ -547,7 +547,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '@Andy hello',
-        }),
+        })
       );
     });
 
@@ -566,7 +566,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: 'hello everyone',
-        }),
+        })
       );
     });
 
@@ -586,7 +586,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '@Andy check this',
-        }),
+        })
       );
     });
   });
@@ -613,7 +613,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '[Image: photo.png]',
-        }),
+        })
       );
     });
 
@@ -636,7 +636,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '[Video: clip.mp4]',
-        }),
+        })
       );
     });
 
@@ -659,7 +659,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '[File: report.pdf]',
-        }),
+        })
       );
     });
 
@@ -682,7 +682,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: 'Check this out\n[Image: photo.jpg]',
-        }),
+        })
       );
     });
 
@@ -706,7 +706,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '[Image: a.png]\n[File: b.txt]',
-        }),
+        })
       );
     });
   });
@@ -730,7 +730,7 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.objectContaining({
           content: '[Reply to Bob] I agree with that',
-        }),
+        })
       );
     });
   });
@@ -758,7 +758,7 @@ describe('DiscordChannel', () => {
           sender_name: 'Alice',
           reply_to_message_id: 'bot_msg_001',
           is_from_me: false,
-        }),
+        })
       );
     });
 
@@ -773,7 +773,7 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'yes' }),
+        expect.objectContaining({ content: 'yes' })
       );
     });
 
@@ -788,11 +788,11 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'yes' }),
+        expect.objectContaining({ content: 'yes' })
       );
     });
 
-    it('translates 1️⃣ into "post 1"', async () => {
+    it('translates 1️⃣ into "1"', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -803,11 +803,11 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'post 1' }),
+        expect.objectContaining({ content: '1' })
       );
     });
 
-    it('translates 3️⃣ into "post 3"', async () => {
+    it('translates 3️⃣ into "3"', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -818,7 +818,7 @@ describe('DiscordChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'post 3' }),
+        expect.objectContaining({ content: '3' })
       );
     });
 
@@ -854,7 +854,7 @@ describe('DiscordChannel', () => {
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      const reaction = createReaction({ emojiName: '🎉' });
+      const reaction = createReaction({ emojiName: '🦄' });
       const user = createReactionUser({});
       await triggerReaction(reaction, user);
 
@@ -888,7 +888,7 @@ describe('DiscordChannel', () => {
       expect(reaction.fetch).toHaveBeenCalled();
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'yes' }),
+        expect.objectContaining({ content: 'yes' })
       );
     });
 
@@ -907,7 +907,7 @@ describe('DiscordChannel', () => {
       expect(user.fetch).toHaveBeenCalled();
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({ content: 'yes' }),
+        expect.objectContaining({ content: 'yes' })
       );
     });
   });
@@ -925,7 +925,7 @@ describe('DiscordChannel', () => {
       const fetchedChannel =
         await currentClient().channels.fetch('1234567890123456');
       expect(currentClient().channels.fetch).toHaveBeenCalledWith(
-        '1234567890123456',
+        '1234567890123456'
       );
     });
 
@@ -945,12 +945,12 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       currentClient().channels.fetch.mockRejectedValueOnce(
-        new Error('Channel not found'),
+        new Error('Channel not found')
       );
 
       // Should not throw
       await expect(
-        channel.sendMessage('dc:1234567890123456', 'Will fail'),
+        channel.sendMessage('dc:1234567890123456', 'Will fail')
       ).resolves.toBeUndefined();
     });
 
