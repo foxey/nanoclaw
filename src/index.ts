@@ -1,7 +1,7 @@
-import fs from "fs";
-import path from "path";
+import fs from 'fs';
+import path from 'path';
 
-import { OneCLI } from "@onecli-sh/sdk";
+import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
@@ -13,22 +13,22 @@ import {
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
-} from "./config.js";
-import "./channels/index.js";
+} from './config.js';
+import './channels/index.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
-} from "./channels/registry.js";
+} from './channels/registry.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
-} from "./container-runner.js";
+} from './container-runner.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
-} from "./container-runtime.js";
+} from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -45,36 +45,36 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
-} from "./db.js";
-import { GroupQueue } from "./group-queue.js";
-import { resolveGroupFolderPath } from "./group-folder.js";
-import { startIpcWatcher } from "./ipc.js";
-import { findChannel, formatMessages, formatOutbound } from "./router.js";
+} from './db.js';
+import { GroupQueue } from './group-queue.js';
+import { resolveGroupFolderPath } from './group-folder.js';
+import { startIpcWatcher } from './ipc.js';
+import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
   stopRemoteControl,
-} from "./remote-control.js";
+} from './remote-control.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
   shouldDropMessage,
-} from "./sender-allowlist.js";
-import { startSessionCleanup } from "./session-cleanup.js";
+} from './sender-allowlist.js';
+import { startSessionCleanup } from './session-cleanup.js';
 import {
   extractSessionCommand,
   handleSessionCommand,
   isSessionCommandAllowed,
-} from "./session-commands.js";
-import { startSchedulerLoop } from "./task-scheduler.js";
-import { Channel, NewMessage, RegisteredGroup } from "./types.js";
-import { logger } from "./logger.js";
+} from './session-commands.js';
+import { startSchedulerLoop } from './task-scheduler.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from "./router.js";
+export { escapeXml, formatMessages } from './router.js';
 
-let lastTimestamp = "";
+let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
@@ -90,37 +90,37 @@ const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
   if (group.isMain) return;
-  const identifier = group.folder.toLowerCase().replace(/_/g, "-");
+  const identifier = group.folder.toLowerCase().replace(/_/g, '-');
   onecli.ensureAgent({ name: group.name, identifier }).then(
     (res) => {
       logger.info(
         { jid, identifier, created: res.created },
-        "OneCLI agent ensured",
+        'OneCLI agent ensured',
       );
     },
     (err) => {
       logger.debug(
         { jid, identifier, err: String(err) },
-        "OneCLI agent ensure skipped",
+        'OneCLI agent ensure skipped',
       );
     },
   );
 }
 
 function loadState(): void {
-  lastTimestamp = getRouterState("last_timestamp") || "";
-  const agentTs = getRouterState("last_agent_timestamp");
+  lastTimestamp = getRouterState('last_timestamp') || '';
+  const agentTs = getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
-    logger.warn("Corrupted last_agent_timestamp in DB, resetting");
+    logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
-    "State loaded",
+    'State loaded',
   );
 }
 
@@ -136,18 +136,18 @@ function getOrRecoverCursor(chatJid: string): string {
   if (botTs) {
     logger.info(
       { chatJid, recoveredFrom: botTs },
-      "Recovered message cursor from last bot reply",
+      'Recovered message cursor from last bot reply',
     );
     lastAgentTimestamp[chatJid] = botTs;
     saveState();
     return botTs;
   }
-  return "";
+  return '';
 }
 
 function saveState(): void {
-  setRouterState("last_timestamp", lastTimestamp);
-  setRouterState("last_agent_timestamp", JSON.stringify(lastAgentTimestamp));
+  setRouterState('last_timestamp', lastTimestamp);
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -157,7 +157,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   } catch (err) {
     logger.warn(
       { jid, folder: group.folder, err },
-      "Rejecting group registration with invalid folder",
+      'Rejecting group registration with invalid folder',
     );
     return;
   }
@@ -166,25 +166,25 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   setRegisteredGroup(jid, group);
 
   // Create group folder
-  fs.mkdirSync(path.join(groupDir, "logs"), { recursive: true });
+  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   // Copy CLAUDE.md template into the new group folder so agents have
   // identity and instructions from the first run.  (Fixes #1391)
-  const groupMdFile = path.join(groupDir, "CLAUDE.md");
+  const groupMdFile = path.join(groupDir, 'CLAUDE.md');
   if (!fs.existsSync(groupMdFile)) {
     const templateFile = path.join(
       GROUPS_DIR,
-      group.isMain ? "main" : "global",
-      "CLAUDE.md",
+      group.isMain ? 'main' : 'global',
+      'CLAUDE.md',
     );
     if (fs.existsSync(templateFile)) {
-      let content = fs.readFileSync(templateFile, "utf-8");
-      if (ASSISTANT_NAME !== "Andy") {
+      let content = fs.readFileSync(templateFile, 'utf-8');
+      if (ASSISTANT_NAME !== 'Andy') {
         content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
         content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
       }
       fs.writeFileSync(groupMdFile, content);
-      logger.info({ folder: group.folder }, "Created CLAUDE.md from template");
+      logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
     }
   }
 
@@ -193,7 +193,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
-    "Group registered",
+    'Group registered',
   );
 }
 
@@ -201,12 +201,12 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import("./container-runner.js").AvailableGroup[] {
+export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== "__group_sync__" && c.is_group)
+    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -232,7 +232,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
-    logger.warn({ chatJid }, "No channel owns JID, skipping messages");
+    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
   }
 
@@ -305,14 +305,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || "";
+  const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
-    "Processing messages",
+    'Processing messages',
   );
 
   // Track idle timer for closing stdin when agent is idle
@@ -323,7 +323,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     idleTimer = setTimeout(() => {
       logger.debug(
         { group: group.name },
-        "Idle timeout, closing container stdin",
+        'Idle timeout, closing container stdin',
       );
       queue.closeStdin(chatJid);
     }, IDLE_TIMEOUT);
@@ -337,11 +337,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
-        typeof result.result === "string"
+        typeof result.result === 'string'
           ? result.result
           : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, "").trim();
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(sendJid, text);
@@ -351,11 +351,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === "success") {
+    if (result.status === 'success') {
       queue.notifyIdle(chatJid);
     }
 
-    if (result.status === "error") {
+    if (result.status === 'error') {
       hadError = true;
     }
   });
@@ -363,13 +363,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(sendJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === "error" || hadError) {
+  if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn(
         { group: group.name },
-        "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
+        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
     }
@@ -378,7 +378,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn(
       { group: group.name },
-      "Agent error, rolled back message cursor for retry",
+      'Agent error, rolled back message cursor for retry',
     );
     return false;
   }
@@ -391,7 +391,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<"success" | "error"> {
+): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -453,7 +453,7 @@ async function runAgent(
       setSession(group.folder, output.newSessionId);
     }
 
-    if (output.status === "error") {
+    if (output.status === 'error') {
       // Detect stale/corrupt session — clear it so the next retry starts fresh.
       // The session .jsonl can go missing after a crash mid-write, manual
       // deletion, or disk-full. The existing backoff in group-queue.ts
@@ -468,7 +468,7 @@ async function runAgent(
       if (isStaleSession) {
         logger.warn(
           { group: group.name, staleSessionId: sessionId, error: output.error },
-          "Stale session detected — clearing for next retry",
+          'Stale session detected — clearing for next retry',
         );
         delete sessions[group.folder];
         deleteSession(group.folder);
@@ -476,21 +476,21 @@ async function runAgent(
 
       logger.error(
         { group: group.name, error: output.error },
-        "Container agent error",
+        'Container agent error',
       );
-      return "error";
+      return 'error';
     }
 
-    return "success";
+    return 'success';
   } catch (err) {
-    logger.error({ group: group.name, err }, "Agent error");
-    return "error";
+    logger.error({ group: group.name, err }, 'Agent error');
+    return 'error';
   }
 }
 
 async function startMessageLoop(): Promise<void> {
   if (messageLoopRunning) {
-    logger.debug("Message loop already running, skipping duplicate start");
+    logger.debug('Message loop already running, skipping duplicate start');
     return;
   }
   messageLoopRunning = true;
@@ -507,7 +507,7 @@ async function startMessageLoop(): Promise<void> {
       );
 
       if (messages.length > 0) {
-        logger.info({ count: messages.length }, "New messages");
+        logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
@@ -530,7 +530,7 @@ async function startMessageLoop(): Promise<void> {
 
           const channel = findChannel(channels, chatJid);
           if (!channel) {
-            logger.warn({ chatJid }, "No channel owns JID, skipping messages");
+            logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
             continue;
           }
 
@@ -598,7 +598,7 @@ async function startMessageLoop(): Promise<void> {
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
-              "Piped messages to active container",
+              'Piped messages to active container',
             );
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
@@ -607,7 +607,7 @@ async function startMessageLoop(): Promise<void> {
             channel
               .setTyping?.(chatJid, true)
               ?.catch((err) =>
-                logger.warn({ chatJid, err }, "Failed to set typing indicator"),
+                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
             // No active container — enqueue for a new one
@@ -616,7 +616,7 @@ async function startMessageLoop(): Promise<void> {
         }
       }
     } catch (err) {
-      logger.error({ err }, "Error in message loop");
+      logger.error({ err }, 'Error in message loop');
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
@@ -637,7 +637,7 @@ function recoverPendingMessages(): void {
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
-        "Recovery: found unprocessed messages",
+        'Recovery: found unprocessed messages',
       );
       queue.enqueueMessageCheck(chatJid);
     }
@@ -652,7 +652,7 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
-  logger.info("Database initialized");
+  logger.info('Database initialized');
   loadState();
 
   // Ensure OneCLI agents exist for all registered groups.
@@ -665,13 +665,13 @@ async function main(): Promise<void> {
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, "Shutdown signal received");
+    logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
   // Handle /remote-control and /remote-control-end commands
   async function handleRemoteControl(
@@ -683,7 +683,7 @@ async function main(): Promise<void> {
     if (!group?.isMain) {
       logger.warn(
         { chatJid, sender: msg.sender },
-        "Remote control rejected: not main group",
+        'Remote control rejected: not main group',
       );
       return;
     }
@@ -691,7 +691,7 @@ async function main(): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
-    if (command === "/remote-control") {
+    if (command === '/remote-control') {
       const result = await startRemoteControl(
         msg.sender,
         chatJid,
@@ -708,7 +708,7 @@ async function main(): Promise<void> {
     } else {
       const result = stopRemoteControl();
       if (result.ok) {
-        await channel.sendMessage(chatJid, "Remote Control session ended.");
+        await channel.sendMessage(chatJid, 'Remote Control session ended.');
       } else {
         await channel.sendMessage(chatJid, result.error);
       }
@@ -720,9 +720,9 @@ async function main(): Promise<void> {
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Remote control commands — intercept before storage
       const trimmed = msg.content.trim();
-      if (trimmed === "/remote-control" || trimmed === "/remote-control-end") {
+      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, "Remote control command error"),
+          logger.error({ err, chatJid }, 'Remote control command error'),
         );
         return;
       }
@@ -737,7 +737,7 @@ async function main(): Promise<void> {
           if (cfg.logDenied) {
             logger.debug(
               { chatJid, sender: msg.sender },
-              "sender-allowlist: dropping message (drop mode)",
+              'sender-allowlist: dropping message (drop mode)',
             );
           }
           return;
@@ -770,7 +770,7 @@ async function main(): Promise<void> {
     if (!channel) {
       logger.warn(
         { channel: channelName },
-        "Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.",
+        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
       );
       continue;
     }
@@ -778,7 +778,7 @@ async function main(): Promise<void> {
     await channel.connect();
   }
   if (channels.length === 0) {
-    logger.fatal("No channels connected");
+    logger.fatal('No channels connected');
     process.exit(1);
   }
 
@@ -792,7 +792,7 @@ async function main(): Promise<void> {
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
-        logger.warn({ jid }, "No channel owns JID, cannot send message");
+        logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
       const text = formatOutbound(rawText);
@@ -838,7 +838,7 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
-    logger.fatal({ err }, "Message loop crashed unexpectedly");
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
   });
 }
@@ -851,7 +851,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, "Failed to start NanoClaw");
+    logger.error({ err }, 'Failed to start NanoClaw');
     process.exit(1);
   });
 }
