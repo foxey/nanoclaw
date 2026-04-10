@@ -23,23 +23,102 @@ import {
 } from '../types.js';
 
 /**
- * Emoji reactions that map to approval actions.
- * 👍 (all skin tones) and ✅ → "yes"
- * Number keycap emojis 1️⃣–5️⃣ → "post N"
+ * Emoji reactions translated to short text tokens and forwarded to the agent
+ * as a reply to the reacted-to message. The agent decides what to do with the
+ * token in context (e.g. "1" → "post 1" in the GitHub digest workflow).
  */
-const APPROVAL_REACTIONS: Record<string, string> = {
+const EMOJI_REACTIONS: Record<string, string> = {
+  // ── Thumbs up (all skin tones) ──────────────────────────────────────────
   '👍': 'yes',
   '👍🏻': 'yes',
   '👍🏼': 'yes',
   '👍🏽': 'yes',
   '👍🏾': 'yes',
   '👍🏿': 'yes',
+  // ── Thumbs down (all skin tones) ────────────────────────────────────────
+  '👎': 'no',
+  '👎🏻': 'no',
+  '👎🏼': 'no',
+  '👎🏽': 'no',
+  '👎🏾': 'no',
+  '👎🏿': 'no',
+  // ── Check / cross ────────────────────────────────────────────────────────
   '✅': 'yes',
-  '1️⃣': 'post 1',
-  '2️⃣': 'post 2',
-  '3️⃣': 'post 3',
-  '4️⃣': 'post 4',
-  '5️⃣': 'post 5',
+  '❌': 'no',
+  // ── Number keycaps 0–9 ───────────────────────────────────────────────────
+  '0️⃣': '0',
+  '1️⃣': '1',
+  '2️⃣': '2',
+  '3️⃣': '3',
+  '4️⃣': '4',
+  '5️⃣': '5',
+  '6️⃣': '6',
+  '7️⃣': '7',
+  '8️⃣': '8',
+  '9️⃣': '9',
+  // ── Positive / celebratory ───────────────────────────────────────────────
+  '🎉': 'celebrate',
+  '🥳': 'celebrate',
+  '🤩': 'amazing',
+  '🥰': 'love',
+  '😍': 'love',
+  '😁': 'great',
+  '😄': 'great',
+  '😊': 'great',
+  '☺️': 'great',
+  // ── Hands (all skin tones) ───────────────────────────────────────────────
+  '🙌': 'great',
+  '🙌🏻': 'great',
+  '🙌🏼': 'great',
+  '🙌🏽': 'great',
+  '🙌🏾': 'great',
+  '🙌🏿': 'great',
+  '🙏': 'thanks',
+  '🙏🏻': 'thanks',
+  '🙏🏼': 'thanks',
+  '🙏🏽': 'thanks',
+  '🙏🏾': 'thanks',
+  '🙏🏿': 'thanks',
+  // ── Shrug — neutral + man + woman, all skin tones ────────────────────────
+  '🤷': 'shrug',
+  '🤷🏻': 'shrug',
+  '🤷🏼': 'shrug',
+  '🤷🏽': 'shrug',
+  '🤷🏾': 'shrug',
+  '🤷🏿': 'shrug',
+  '🤷‍♂️': 'shrug',
+  '🤷🏻‍♂️': 'shrug',
+  '🤷🏼‍♂️': 'shrug',
+  '🤷🏽‍♂️': 'shrug',
+  '🤷🏾‍♂️': 'shrug',
+  '🤷🏿‍♂️': 'shrug',
+  '🤷‍♀️': 'shrug',
+  '🤷🏻‍♀️': 'shrug',
+  '🤷🏼‍♀️': 'shrug',
+  '🤷🏽‍♀️': 'shrug',
+  '🤷🏾‍♀️': 'shrug',
+  '🤷🏿‍♀️': 'shrug',
+  // ── Neutral / mild ───────────────────────────────────────────────────────
+  '🙂': 'ok',
+  '🥲': 'bittersweet',
+  '😉': 'wink',
+  '🤔': 'thinking',
+  '🤨': 'hmm',
+  '😳': 'wow',
+  '😕': 'confused',
+  // ── Negative / sad ───────────────────────────────────────────────────────
+  '😞': 'sad',
+  '😢': 'sad',
+  '☹️': 'sad',
+  '🙁': 'sad',
+  '😠': 'angry',
+  '😡': 'angry',
+  // ── Funny / surprised ────────────────────────────────────────────────────
+  '😂': 'lol',
+  '🤣': 'lol',
+  '😬': 'yikes',
+  '🙀': 'omg',
+  '😱': 'omg',
 };
 
 export interface DiscordChannelOpts {
@@ -110,14 +189,14 @@ export class DiscordChannel implements Channel {
           new Date(timestamp).toISOString(),
           senderName,
           'discord',
-          false,
+          false
         );
 
         const group = this.opts.registeredGroups()[chatJid];
         if (!group) {
           logger.debug(
             { chatJid, senderName },
-            'DM from unregistered Discord channel',
+            'DM from unregistered Discord channel'
           );
           return;
         }
@@ -133,7 +212,7 @@ export class DiscordChannel implements Channel {
         });
 
         logger.info({ chatJid, sender: senderName }, 'Discord DM stored');
-      },
+      }
     );
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
@@ -198,7 +277,7 @@ export class DiscordChannel implements Channel {
             } else {
               return `[File: ${att.name || 'file'}]`;
             }
-          },
+          }
         );
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
@@ -211,7 +290,7 @@ export class DiscordChannel implements Channel {
       if (message.reference?.messageId) {
         try {
           const repliedTo = await message.channel.messages.fetch(
-            message.reference.messageId,
+            message.reference.messageId
           );
           const replyAuthor =
             repliedTo.member?.displayName ||
@@ -230,7 +309,7 @@ export class DiscordChannel implements Channel {
         timestamp,
         chatName,
         'discord',
-        isGroup,
+        isGroup
       );
 
       // Only deliver full message for registered groups
@@ -238,7 +317,7 @@ export class DiscordChannel implements Channel {
       if (!group) {
         logger.debug(
           { chatJid, chatName },
-          'Message from unregistered Discord channel',
+          'Message from unregistered Discord channel'
         );
         return;
       }
@@ -256,7 +335,7 @@ export class DiscordChannel implements Channel {
 
       logger.info(
         { chatJid, chatName, sender: senderName },
-        'Discord message stored',
+        'Discord message stored'
       );
     });
 
@@ -266,7 +345,7 @@ export class DiscordChannel implements Channel {
       Events.MessageReactionAdd,
       async (
         reaction: MessageReaction | PartialMessageReaction,
-        user: User | PartialUser,
+        user: User | PartialUser
       ) => {
         // Ignore reactions from bots (including self)
         if (user.bot) return;
@@ -302,7 +381,7 @@ export class DiscordChannel implements Channel {
 
         // Map emoji to approval text — ignore unrecognised reactions
         const emojiName = reaction.emoji.name ?? '';
-        const approvalText = APPROVAL_REACTIONS[emojiName];
+        const approvalText = EMOJI_REACTIONS[emojiName];
         if (!approvalText) return;
 
         // Fetch full user if partial
@@ -320,7 +399,7 @@ export class DiscordChannel implements Channel {
 
         logger.info(
           { chatJid, emoji: emojiName, approvalText, sender: senderName },
-          'Discord reaction approval received',
+          'Discord reaction approval received'
         );
 
         // Synthesise as a regular message — include reply_to_message_id so the
@@ -335,7 +414,7 @@ export class DiscordChannel implements Channel {
           is_from_me: false,
           reply_to_message_id: message.id,
         });
-      },
+      }
     );
 
     // Handle errors gracefully
@@ -347,11 +426,11 @@ export class DiscordChannel implements Channel {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
-          'Discord bot connected',
+          'Discord bot connected'
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
         console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`,
+          `  Use /chatid command or check channel IDs in Discord settings\n`
         );
         resolve();
       });
