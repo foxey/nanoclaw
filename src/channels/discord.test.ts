@@ -33,6 +33,7 @@ const clientRef = vi.hoisted(() => ({ current: null as any }));
 vi.mock('discord.js', () => {
   const Events = {
     MessageCreate: 'messageCreate',
+    MessageReactionAdd: 'messageReactionAdd',
     ClientReady: 'ready',
     Error: 'error',
   };
@@ -42,6 +43,14 @@ vi.mock('discord.js', () => {
     GuildMessages: 2,
     MessageContent: 4,
     DirectMessages: 8,
+    GuildMessageReactions: 64,
+  };
+
+  const Partials = {
+    Channel: 'Channel',
+    Message: 'Message',
+    Reaction: 'Reaction',
+    User: 'User',
   };
 
   class MockClient {
@@ -96,6 +105,7 @@ vi.mock('discord.js', () => {
     Client: MockClient,
     Events,
     GatewayIntentBits,
+    Partials,
     TextChannel,
   };
 });
@@ -179,6 +189,72 @@ function createMessage(overrides: {
   };
 }
 
+/**
+ * Create a mock reaction object for MessageReactionAdd tests.
+ */
+function createReaction(overrides: {
+  channelId?: string;
+  messageId?: string;
+  emojiName?: string;
+  messageBotId?: string;   // author ID of the reacted-to message (default: bot's own ID)
+  isPartial?: boolean;
+  messageIsPartial?: boolean;
+}) {
+  const channelId = overrides.channelId ?? '1234567890123456';
+  const messageId = overrides.messageId ?? 'bot_msg_001';
+  const botId = '999888777';
+  const messageBotId = overrides.messageBotId ?? botId;
+
+  const message = {
+    id: messageId,
+    channelId,
+    partial: overrides.messageIsPartial ?? false,
+    author: {
+      id: messageBotId,
+      bot: true,
+    },
+    fetch: vi.fn().mockResolvedValue({
+      id: messageId,
+      channelId,
+      partial: false,
+      author: {
+        id: messageBotId,
+        bot: true,
+      },
+    }),
+  };
+
+  return {
+    partial: overrides.isPartial ?? false,
+    emoji: { name: overrides.emojiName ?? '👍' },
+    message,
+    fetch: vi.fn().mockResolvedValue({
+      partial: false,
+      emoji: { name: overrides.emojiName ?? '👍' },
+      message,
+    }),
+  };
+}
+
+function createReactionUser(overrides: {
+  userId?: string;
+  username?: string;
+  displayName?: string;
+  isBot?: boolean;
+  isPartial?: boolean;
+}) {
+  const user = {
+    id: overrides.userId ?? '55512345',
+    username: overrides.username ?? 'alice',
+    displayName: overrides.displayName ?? 'Alice',
+    bot: overrides.isBot ?? false,
+    partial: overrides.isPartial ?? false,
+    fetch: vi.fn(),
+  };
+  user.fetch.mockResolvedValue({ ...user, partial: false });
+  return user;
+}
+
 function currentClient() {
   return clientRef.current;
 }
@@ -186,6 +262,12 @@ function currentClient() {
 async function triggerMessage(message: any) {
   const handlers = currentClient().eventHandlers.get('messageCreate') || [];
   for (const h of handlers) await h(message);
+}
+
+async function triggerReaction(reaction: any, user: any) {
+  const handlers =
+    currentClient().eventHandlers.get('messageReactionAdd') || [];
+  for (const h of handlers) await h(reaction, user);
 }
 
 // --- Tests ---
@@ -218,6 +300,7 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       expect(currentClient().eventHandlers.has('messageCreate')).toBe(true);
+      expect(currentClient().eventHandlers.has('messageReactionAdd')).toBe(true);
       expect(currentClient().eventHandlers.has('error')).toBe(true);
       expect(currentClient().eventHandlers.has('ready')).toBe(true);
     });
@@ -625,6 +708,177 @@ describe('DiscordChannel', () => {
         expect.objectContaining({
           content: '[Reply to Bob] I agree with that',
         }),
+      );
+    });
+  });
+
+  // --- Reaction approvals ---
+
+  describe('reaction approvals', () => {
+    it('translates 👍 on bot message into "yes" approval', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍', messageId: 'bot_msg_001' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          id: 'reaction-bot_msg_001-55512345',
+          content: 'yes',
+          sender_name: 'Alice',
+          reply_to_message_id: 'bot_msg_001',
+          is_from_me: false,
+        }),
+      );
+    });
+
+    it('translates 👍🏼 (skin tone) into "yes" approval', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍🏼' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'yes' }),
+      );
+    });
+
+    it('translates ✅ into "yes" approval', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '✅' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'yes' }),
+      );
+    });
+
+    it('translates 1️⃣ into "post 1"', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '1️⃣' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'post 1' }),
+      );
+    });
+
+    it('translates 3️⃣ into "post 3"', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '3️⃣' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'post 3' }),
+      );
+    });
+
+    it('ignores reactions from bots', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍' });
+      const user = createReactionUser({ isBot: true });
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('ignores reactions on non-bot messages', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({
+        emojiName: '👍',
+        messageBotId: '111111111', // not the bot's own ID
+      });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('ignores unrecognised emoji reactions', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '🎉' });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('ignores reactions on messages in unregistered channels', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({
+        emojiName: '👍',
+        channelId: '9999999999999999',
+      });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('fetches partial reaction before processing', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍', isPartial: true });
+      const user = createReactionUser({});
+      await triggerReaction(reaction, user);
+
+      expect(reaction.fetch).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'yes' }),
+      );
+    });
+
+    it('fetches partial user before processing', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const reaction = createReaction({ emojiName: '👍' });
+      const user = createReactionUser({ isPartial: true, displayName: 'Alice' });
+      await triggerReaction(reaction, user);
+
+      expect(user.fetch).toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({ content: 'yes' }),
       );
     });
   });
