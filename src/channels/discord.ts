@@ -3,8 +3,12 @@ import {
   Events,
   GatewayIntentBits,
   Message,
+  MessageReaction,
+  PartialMessageReaction,
+  PartialUser,
   Partials,
   TextChannel,
+  User,
 } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -17,6 +21,26 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+/**
+ * Emoji reactions that map to approval actions.
+ * 👍 (all skin tones) and ✅ → "yes"
+ * Number keycap emojis 1️⃣–5️⃣ → "post N"
+ */
+const APPROVAL_REACTIONS: Record<string, string> = {
+  '👍': 'yes',
+  '👍🏻': 'yes',
+  '👍🏼': 'yes',
+  '👍🏽': 'yes',
+  '👍🏾': 'yes',
+  '👍🏿': 'yes',
+  '✅': 'yes',
+  '1️⃣': 'post 1',
+  '2️⃣': 'post 2',
+  '3️⃣': 'post 3',
+  '4️⃣': 'post 4',
+  '5️⃣': 'post 5',
+};
 
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
@@ -43,51 +67,69 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessageReactions,
       ],
-      partials: [Partials.Channel, Partials.Message, Partials.User],
+      partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
     });
 
     // discord.js v14 silently drops MessageCreate for DM channels: partial DM channels
     // lack a type field so isTextBased() returns false. Handle DMs via the raw gateway
     // event instead, which always fires regardless of channel cache state.
-    this.client.on('raw', async (event: { t: string; d: Record<string, unknown> }) => {
-      if (event.t !== 'MESSAGE_CREATE') return;
-      const data = event.d;
-      if (data.guild_id) return; // guild messages are handled by MessageCreate
+    this.client.on(
+      'raw',
+      async (event: { t: string; d: Record<string, unknown> }) => {
+        if (event.t !== 'MESSAGE_CREATE') return;
+        const data = event.d;
+        if (data.guild_id) return; // guild messages are handled by MessageCreate
 
-      const author = data.author as { id: string; username: string; global_name?: string; bot?: boolean } | null;
-      if (!author || author.bot) return;
+        const author = data.author as {
+          id: string;
+          username: string;
+          global_name?: string;
+          bot?: boolean;
+        } | null;
+        if (!author || author.bot) return;
 
-      const channelId = data.channel_id as string;
-      const chatJid = `dc:${channelId}`;
-      const content = (data.content as string) || '';
-      const timestamp = data.timestamp as string;
-      const senderName = author.global_name || author.username;
-      const sender = author.id;
-      const msgId = data.id as string;
+        const channelId = data.channel_id as string;
+        const chatJid = `dc:${channelId}`;
+        const content = (data.content as string) || '';
+        const timestamp = data.timestamp as string;
+        const senderName = author.global_name || author.username;
+        const sender = author.id;
+        const msgId = data.id as string;
 
-      logger.info({ chatJid }, 'Discord DM received');
+        logger.info({ chatJid }, 'Discord DM received');
 
-      this.opts.onChatMetadata(chatJid, new Date(timestamp).toISOString(), senderName, 'discord', false);
+        this.opts.onChatMetadata(
+          chatJid,
+          new Date(timestamp).toISOString(),
+          senderName,
+          'discord',
+          false,
+        );
 
-      const group = this.opts.registeredGroups()[chatJid];
-      if (!group) {
-        logger.debug({ chatJid, senderName }, 'DM from unregistered Discord channel');
-        return;
-      }
+        const group = this.opts.registeredGroups()[chatJid];
+        if (!group) {
+          logger.debug(
+            { chatJid, senderName },
+            'DM from unregistered Discord channel',
+          );
+          return;
+        }
 
-      this.opts.onMessage(chatJid, {
-        id: msgId,
-        chat_jid: chatJid,
-        sender,
-        sender_name: senderName,
-        content,
-        timestamp: new Date(timestamp).toISOString(),
-        is_from_me: false,
-      });
+        this.opts.onMessage(chatJid, {
+          id: msgId,
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content,
+          timestamp: new Date(timestamp).toISOString(),
+          is_from_me: false,
+        });
 
-      logger.info({ chatJid, sender: senderName }, 'Discord DM stored');
-    });
+        logger.info({ chatJid, sender: senderName }, 'Discord DM stored');
+      },
+    );
 
     this.client.on(Events.MessageCreate, async (message: Message) => {
       // Ignore bot messages (including own)
@@ -212,6 +254,84 @@ export class DiscordChannel implements Channel {
         'Discord message stored',
       );
     });
+
+    // Handle emoji reactions — translate approved reactions on bot messages
+    // into synthetic approval messages so agents can respond without typed replies.
+    this.client.on(
+      Events.MessageReactionAdd,
+      async (
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => {
+        // Ignore reactions from bots (including self)
+        if (user.bot) return;
+
+        // Fetch partial reaction if needed
+        if (reaction.partial) {
+          try {
+            reaction = await reaction.fetch();
+          } catch (err) {
+            logger.debug({ err }, 'Failed to fetch partial reaction');
+            return;
+          }
+        }
+
+        const message = reaction.message.partial
+          ? await reaction.message.fetch().catch((err) => {
+              logger.debug({ err }, 'Failed to fetch partial reaction message');
+              return null;
+            })
+          : reaction.message;
+
+        if (!message) return;
+
+        // Only handle reactions on the bot's own messages
+        if (!message.author?.bot) return;
+        if (message.author.id !== this.client?.user?.id) return;
+
+        const channelId = message.channelId;
+        const chatJid = `dc:${channelId}`;
+
+        const group = this.opts.registeredGroups()[chatJid];
+        if (!group) return;
+
+        // Map emoji to approval text — ignore unrecognised reactions
+        const emojiName = reaction.emoji.name ?? '';
+        const approvalText = APPROVAL_REACTIONS[emojiName];
+        if (!approvalText) return;
+
+        // Fetch full user if partial
+        const fullUser: User = user.partial
+          ? await (user as PartialUser).fetch().catch((err) => {
+              logger.debug({ err }, 'Failed to fetch partial reaction user');
+              return null as unknown as User;
+            })
+          : (user as User);
+
+        if (!fullUser) return;
+
+        const senderName = fullUser.displayName || fullUser.username;
+        const sender = fullUser.id;
+
+        logger.info(
+          { chatJid, emoji: emojiName, approvalText, sender: senderName },
+          'Discord reaction approval received',
+        );
+
+        // Synthesise as a regular message — include reply_to_message_id so the
+        // agent knows which of its messages was approved.
+        this.opts.onMessage(chatJid, {
+          id: `reaction-${message.id}-${sender}`,
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content: approvalText,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          reply_to_message_id: message.id,
+        });
+      },
+    );
 
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
