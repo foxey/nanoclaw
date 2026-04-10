@@ -264,6 +264,27 @@ async function triggerMessage(message: any) {
   for (const h of handlers) await h(message);
 }
 
+async function triggerRawDM(message: ReturnType<typeof createMessage>) {
+  const rawEvent = {
+    t: 'MESSAGE_CREATE',
+    d: {
+      id: message.id,
+      channel_id: message.channelId,
+      content: message.content,
+      timestamp: message.createdAt.toISOString(),
+      author: {
+        id: message.author.id,
+        username: message.author.username,
+        global_name: message.author.displayName,
+        bot: message.author.bot,
+      },
+      // no guild_id — marks this as a DM
+    },
+  };
+  const handlers = currentClient().eventHandlers.get('raw') || [];
+  for (const h of handlers) await h(rawEvent);
+}
+
 async function triggerReaction(reaction: any, user: any) {
   const handlers =
     currentClient().eventHandlers.get('messageReactionAdd') || [];
@@ -452,7 +473,7 @@ describe('DiscordChannel', () => {
         guildName: undefined,
         authorDisplayName: 'Alice',
       });
-      await triggerMessage(msg);
+      await triggerRawDM(msg);
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         'dc:1234567890123456',
