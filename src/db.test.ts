@@ -383,7 +383,7 @@ describe('getMessagesSince', () => {
       chat_jid: 'group@g.us',
       sender: 'Bot@s.whatsapp.net',
       sender_name: 'Bot',
-      content: 'Andy: old bot reply',
+      content: 'Ada: old bot reply',
       timestamp: '2024-01-01T00:00:05.000Z',
     });
     const msgs = getMessagesSince(
@@ -624,7 +624,7 @@ describe('registered group isMain', () => {
     setRegisteredGroup('main@s.whatsapp.net', {
       name: 'Main Chat',
       folder: 'whatsapp_main',
-      trigger: '@Andy',
+      trigger: '@Ada',
       added_at: '2024-01-01T00:00:00.000Z',
       isMain: true,
     });
@@ -640,7 +640,7 @@ describe('registered group isMain', () => {
     setRegisteredGroup('group@g.us', {
       name: 'Family Chat',
       folder: 'whatsapp_family-chat',
-      trigger: '@Andy',
+      trigger: '@Ada',
       added_at: '2024-01-01T00:00:00.000Z',
     });
 
