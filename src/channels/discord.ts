@@ -147,6 +147,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.DirectMessageReactions,
       ],
       partials: [
         Partials.Channel,
