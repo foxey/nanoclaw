@@ -147,6 +147,9 @@ function createMessage(overrides: {
   attachments?: Map<string, any>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
+  inThread?: boolean;
+  threadParentId?: string;
+  threadParentName?: string;
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
@@ -174,6 +177,11 @@ function createMessage(overrides: {
     guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
+      isThread: () => overrides.inThread ?? false,
+      parentId: overrides.threadParentId ?? null,
+      parent: overrides.threadParentName
+        ? { name: overrides.threadParentName }
+        : null,
       messages: {
         fetch: vi.fn().mockResolvedValue({
           author: { username: 'Bob', displayName: 'Bob' },
@@ -500,6 +508,63 @@ describe('DiscordChannel', () => {
         'dc:1234567890123456',
         expect.any(String),
         'My Server #bot-chat',
+        'discord',
+        true,
+      );
+    });
+  });
+
+  // --- Thread message handling ---
+
+  describe('thread message handling', () => {
+    it('routes thread message to parent channel JID', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Thread channel ID is 9876543210, parent channel ID is 1234567890123456
+      const msg = createMessage({
+        channelId: '9876543210',
+        content: 'Thread reply',
+        guildName: 'Test Server',
+        channelName: 'thread-name',
+        inThread: true,
+        threadParentId: '1234567890123456',
+        threadParentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      // chatJid should use the parent channel ID, not the thread channel ID
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          chat_jid: 'dc:1234567890123456',
+          content: 'Thread reply',
+          thread_id: 'dc:9876543210',
+        }),
+      );
+    });
+
+    it('includes thread chat name from parent channel', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        channelId: '9876543210',
+        content: 'Thread reply',
+        guildName: 'My Server',
+        channelName: 'thread-name',
+        inThread: true,
+        threadParentId: '1234567890123456',
+        threadParentName: 'general',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onChatMetadata).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.any(String),
+        'My Server #general',
         'discord',
         true,
       );

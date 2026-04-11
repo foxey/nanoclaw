@@ -83,6 +83,9 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+// Maps registered group JIDs to the currently active Discord thread JID for replies.
+const activeThreadJids = new Map<string, string>();
+
 const onecli = new OneCLI({ url: ONECLI_URL });
 
 function ensureOneCLIAgent(jid: string, group: RegisteredGroup): void {
@@ -244,6 +247,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // Route replies to the active thread for this group, if any.
+  const sendJid = activeThreadJids.get(chatJid) ?? chatJid;
+
   // --- Session command interception (before trigger check) ---
   const cmdResult = await handleSessionCommand({
     missedMessages,
@@ -252,9 +258,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     triggerPattern: getTriggerPattern(group.trigger),
     timezone: TIMEZONE,
     deps: {
-      sendMessage: (text) => channel.sendMessage(chatJid, text),
+      sendMessage: (text) => channel.sendMessage(sendJid, text),
       setTyping: (typing) =>
-        channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+        channel.setTyping?.(sendJid, typing) ?? Promise.resolve(),
       runAgent: (prompt, onOutput) =>
         runAgent(group, prompt, chatJid, onOutput),
       closeStdin: () => queue.closeStdin(chatJid),
@@ -323,7 +329,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  await channel.setTyping?.(sendJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -338,7 +344,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await channel.sendMessage(sendJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -354,7 +360,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  await channel.setTyping?.(sendJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -736,6 +742,12 @@ async function main(): Promise<void> {
           }
           return;
         }
+      }
+      // Track active thread for reply routing (Discord threads)
+      if (msg.thread_id) {
+        activeThreadJids.set(chatJid, msg.thread_id);
+      } else {
+        activeThreadJids.delete(chatJid);
       }
       storeMessage(msg);
     },

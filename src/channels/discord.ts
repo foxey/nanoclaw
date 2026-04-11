@@ -147,6 +147,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.DirectMessageReactions,
       ],
       partials: [
         Partials.Channel,
@@ -221,7 +222,11 @@ export class DiscordChannel implements Channel {
       // DMs are handled by the raw event handler above
       if (!message.guild) return;
       const channelId = message.channelId;
-      const chatJid = `dc:${channelId}`;
+      // If the message is in a thread, route it to the parent channel's group
+      const isThread = message.channel.isThread();
+      const threadParentId = isThread ? message.channel.parentId : null;
+      const groupChannelId = threadParentId ?? channelId;
+      const chatJid = `dc:${groupChannelId}`;
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
       const senderName =
@@ -231,11 +236,13 @@ export class DiscordChannel implements Channel {
       const sender = message.author.id;
       const msgId = message.id;
 
-      // Determine chat name
+      // Determine chat name (use parent channel name when inside a thread)
       let chatName: string;
       if (message.guild) {
-        const textChannel = message.channel as TextChannel;
-        chatName = `${message.guild.name} #${textChannel.name}`;
+        const displayChannel = isThread
+          ? message.channel.parent
+          : (message.channel as TextChannel);
+        chatName = `${message.guild.name} #${displayChannel?.name ?? 'unknown'}`;
       } else {
         chatName = senderName;
       }
@@ -331,6 +338,7 @@ export class DiscordChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        ...(isThread ? { thread_id: `dc:${channelId}` } : {}),
       });
 
       logger.info(
