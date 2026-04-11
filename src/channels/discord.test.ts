@@ -10,8 +10,8 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 
 // Mock config
 vi.mock('../config.js', () => ({
-  ASSISTANT_NAME: 'Andy',
-  TRIGGER_PATTERN: /^@Andy\b/i,
+  ASSISTANT_NAME: 'Ada',
+  TRIGGER_PATTERN: /^@Ada\b/i,
 }));
 
 // Mock logger
@@ -55,7 +55,7 @@ vi.mock('discord.js', () => {
 
   class MockClient {
     eventHandlers = new Map<string, Handler[]>();
-    user: any = { id: '999888777', tag: 'Andy#1234' };
+    user: any = { id: '999888777', tag: 'Ada#1234' };
     private _ready = false;
 
     constructor(_opts: any) {
@@ -124,7 +124,7 @@ function createTestOpts(
       'dc:1234567890123456': {
         name: 'Test Server #general',
         folder: 'test-server',
-        trigger: '@Andy',
+        trigger: '@Ada',
         added_at: '2024-01-01T00:00:00.000Z',
       },
     })),
@@ -468,7 +468,7 @@ describe('DiscordChannel', () => {
           'dc:1234567890123456': {
             name: 'DM',
             folder: 'dm',
-            trigger: '@Andy',
+            trigger: '@Ada',
             added_at: '2024-01-01T00:00:00.000Z',
           },
         })),
@@ -589,7 +589,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '@Andy what time is it?',
+          content: '@Ada what time is it?',
         }),
       );
     });
@@ -600,18 +600,18 @@ describe('DiscordChannel', () => {
       await channel.connect();
 
       const msg = createMessage({
-        content: '@Andy hello <@999888777>',
+        content: '@Ada hello <@999888777>',
         mentionsBotId: true,
         guildName: 'Server',
       });
       await triggerMessage(msg);
 
-      // Should NOT prepend @Andy — already starts with trigger
+      // Should NOT prepend @Ada — already starts with trigger
       // But the <@botId> should still be stripped
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '@Andy hello',
+          content: '@Ada hello',
         }),
       );
     });
@@ -650,7 +650,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '@Andy check this',
+          content: '@Ada check this',
         }),
       );
     });
