@@ -435,6 +435,27 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Merge additional MCP servers from user settings.json.
+  // This allows per-group MCP servers (e.g. imaprest) to be configured via
+  // data/sessions/{group}/.claude/settings.json without hardcoding them here.
+  const settingsPath = '/home/node/.claude/settings.json';
+  let extraMcpServers: Record<string, unknown> = {};
+  let extraMcpTools: string[] = [];
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (settings.mcpServers && typeof settings.mcpServers === 'object') {
+        extraMcpServers = settings.mcpServers;
+        extraMcpTools = Object.keys(settings.mcpServers).map(
+          (name) => `mcp__${name}__*`,
+        );
+        log(`Loaded extra MCP servers from settings.json: ${extraMcpTools.join(', ')}`);
+      }
+    }
+  } catch (err) {
+    log(`Failed to read settings.json for MCP servers: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -469,6 +490,7 @@ async function runQuery(
         'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
+        ...extraMcpTools,
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +506,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...extraMcpServers,
       },
       hooks: {
         PreCompact: [
