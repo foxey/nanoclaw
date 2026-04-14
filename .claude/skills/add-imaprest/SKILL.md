@@ -46,20 +46,20 @@ IMAPREST_DIR=<path from Phase 1>
 
 ### Configure credentials
 
-Create `$IMAPREST_DIR/.env` with the mail account details. Ask foxey for `MAIL_USER` and `MAIL_PASSWORD` if not already known. KPN defaults apply for everything else:
+Ask for the mail account details and create `$IMAPREST_DIR/.env`:
 
-```bash
-cat > "$IMAPREST_DIR/.env" << 'EOF'
+```
 MAIL_USER=<email address>
 MAIL_PASSWORD=<email password>
-MAIL_IMAP_HOST=imap.kpnmail.nl
+MAIL_IMAP_HOST=<imap hostname>
 MAIL_IMAP_PORT=993
 MAIL_IMAP_TLS=true
-MAIL_SMTP_HOST=smtp.kpnmail.nl
-MAIL_SMTP_PORT=465
+MAIL_SMTP_HOST=<smtp hostname>
+MAIL_SMTP_PORT=587
 MAIL_SMTP_TLS=true
-EOF
 ```
+
+Common port defaults: IMAP 993 (TLS) or 143 (STARTTLS); SMTP 587 (STARTTLS) or 465 (TLS). Adjust to match the mail provider.
 
 ### Start the containers
 
@@ -93,7 +93,7 @@ docker logs imaprest-mcp --tail 30
 ls /workspace/project/data/sessions/
 ```
 
-Show foxey the available group folders and ask which ones should have email access. Each folder name matches a registered nanoclaw group (e.g. `discord_general`, `whatsapp_main`).
+Show the available group folders and ask which ones should have email access. Each folder name matches a registered nanoclaw group (e.g. `discord_general`, `whatsapp_main`).
 
 ### Add the MCP config to each chosen group
 
@@ -105,8 +105,7 @@ For each group folder, the file to update is:
 
 This file already contains an `env` section created by nanoclaw. Add `mcpServers` alongside it without touching the existing content. Use Python to merge safely:
 
-```bash
-python3 << 'PYEOF'
+```python
 import json, os
 
 # Edit this list:
@@ -127,11 +126,9 @@ for folder in groups:
         json.dump(settings, f, indent=2)
         f.write("\n")
     print(f"Updated {path}")
-
-PYEOF
 ```
 
-If the write fails with a permission error (EROFS), foxey must run these commands directly on the nanoclaw host — copy the Python snippet above and run it there.
+If the write fails with a permission error (EROFS), run the same commands directly on the nanoclaw host.
 
 ### Verify the resulting settings
 
@@ -163,7 +160,7 @@ Both `env` and `mcpServers` must be present.
 
 The `mcp__imaprest__*` tools become available in the configured groups **on the next agent invocation** — the agent runner reads `settings.json` at container startup.
 
-Tell foxey:
+Tell the user:
 
 > imaprest MCP is now configured for: **[list the groups]**
 >
@@ -194,10 +191,10 @@ Common causes: `.env` missing or malformed, port 3001 already in use, Docker dae
 
 ### Authentication errors from IMAP/SMTP
 
-KPN mail uses the same password as webmail — no app-specific password. Verify with:
+Verify credentials are correct for the mail provider. Some providers require an app-specific password rather than the main account password. Check container logs:
 
 ```bash
-curl -sf http://localhost:3000/health | python3 -m json.tool
+docker logs imaprest --tail 30
 ```
 
 If credentials are wrong, edit `.env` and restart:
