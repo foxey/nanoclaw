@@ -6,6 +6,7 @@ dist/
 
 # Local data & auth
 store/
+data
 data/
 logs/
 
