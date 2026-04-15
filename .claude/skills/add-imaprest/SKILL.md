@@ -61,6 +61,28 @@ MAIL_SMTP_TLS=true
 
 Common port defaults: IMAP 993 (TLS) or 143 (STARTTLS); SMTP 465 (TLS) or 587 (STARTTLS). Adjust to match the mail provider.
 
+
+### Check port reachability
+
+Before starting the containers, verify the IMAP and SMTP ports are reachable from this host:
+
+```bash
+source "$IMAPREST_DIR/.env"
+for entry in "IMAP $MAIL_IMAP_HOST $MAIL_IMAP_PORT" "SMTP $MAIL_SMTP_HOST $MAIL_SMTP_PORT"; do
+  read -r label host port <<< "$entry"
+  if nc -zw5 "$host" "$port" 2>/dev/null; then
+    echo "$label ($host:$port): reachable"
+  else
+    echo "$label ($host:$port): BLOCKED"
+  fi
+done
+```
+
+If a port shows as **BLOCKED**, resolve the firewall issue before continuing:
+- Check outbound rules: `sudo ufw status` / `sudo iptables -L OUTPUT -n`
+- Some ISPs block port 465 outbound — try switching to 587 (STARTTLS) in `.env`
+- Confirm the mail server hostname is correct and DNS resolves: `nslookup $MAIL_IMAP_HOST`
+
 ### Start the containers
 
 ```bash
