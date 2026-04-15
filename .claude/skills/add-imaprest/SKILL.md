@@ -55,11 +55,11 @@ MAIL_IMAP_HOST=<imap hostname>
 MAIL_IMAP_PORT=993
 MAIL_IMAP_TLS=true
 MAIL_SMTP_HOST=<smtp hostname>
-MAIL_SMTP_PORT=587
+MAIL_SMTP_PORT=465
 MAIL_SMTP_TLS=true
 ```
 
-Common port defaults: IMAP 993 (TLS) or 143 (STARTTLS); SMTP 587 (STARTTLS) or 465 (TLS). Adjust to match the mail provider.
+Common port defaults: IMAP 993 (TLS) or 143 (STARTTLS); SMTP 465 (TLS) or 587 (STARTTLS). Adjust to match the mail provider.
 
 ### Start the containers
 
@@ -82,7 +82,9 @@ curl -sf http://localhost:3000/health    && echo "REST: OK" || echo "REST: FAIL"
 If health fails, check container logs:
 
 ```bash
-docker logs imaprest-mcp --tail 30
+cd "$IMAPREST_DIR"
+docker compose logs imaprest-mcp --tail 30
+docker compose logs imaprest --tail 30
 ```
 
 ## Phase 3: Configure nanoclaw groups
