@@ -7,7 +7,7 @@ description: Use the imaprest REST API directly with curl or Python — bypasses
 
 This skill shows how to call the imaprest REST API directly, without MCP. Useful when the MCP transport has TLS issues (common with OneCLI + undici), when you want to script email operations in Python, or when you need to inspect raw responses.
 
-**REST base URL**: `http://localhost:3000` (host) or `http://172.17.0.1:3000` (from a Docker container)
+**REST base URL**: `http://localhost:3000/imaprest` (host) or `http://172.17.0.1:3000/imaprest` (from a Docker container)
 
 **Discover the full API**: `GET /openapi.json` returns an OpenAPI 3.0 spec for all endpoints.
 
@@ -23,7 +23,7 @@ Every request (except `/health` and `/openapi.json`) requires mail credentials.
 # Encode credentials
 AUTH=$(echo -n "user@example.com:password" | base64)
 # Use in header
-curl -H "Authorization: Basic $AUTH" http://localhost:3000/mailboxes
+curl -H "Authorization: Basic $AUTH" http://localhost:3000/imaprest/mailboxes
 ```
 
 **Option B — Custom headers (used by MCP/OneCLI injection):**
@@ -31,7 +31,7 @@ curl -H "Authorization: Basic $AUTH" http://localhost:3000/mailboxes
 ```bash
 curl -H "X-Mail-User: user@example.com" \
      -H "X-Mail-Password: password" \
-     http://localhost:3000/mailboxes
+     http://localhost:3000/imaprest/mailboxes
 ```
 
 Both methods work; Basic auth is simpler for direct use and visible in the OpenAPI spec.
@@ -54,7 +54,7 @@ Include IMAP headers for read operations, SMTP headers for sending:
 Define shared header args in shell to avoid repetition:
 
 ```bash
-BASE_URL="http://localhost:3000"
+BASE_URL="http://localhost:3000/imaprest"
 AUTH=$(echo -n "user@example.com:password" | base64)
 IMAP_HEADERS=(
   -H "Authorization: Basic $AUTH"
@@ -153,7 +153,7 @@ import base64
 import ssl
 import os
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "http://localhost:3000/imaprest"
 
 # Encode credentials
 user = "user@example.com"
@@ -210,13 +210,14 @@ if proxy:
 Fetch the full spec for all endpoints, parameters, and response schemas:
 
 ```bash
-curl -s http://localhost:3000/openapi.json | python3 -m json.tool | less
+curl -s http://localhost:3000/imaprest/openapi.json | python3 -m json.tool | less
 ```
 
 Or from a container:
 
 ```bash
-curl -s http://172.17.0.1:3000/openapi.json
+curl -s http://172.17.0.1:3000/imaprest/openapi.json
 ```
 
 The spec documents all security schemes, request/response formats, and is suitable for import into API clients like Insomnia, Postman, or Bruno.
+
