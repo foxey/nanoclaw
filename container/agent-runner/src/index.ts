@@ -650,6 +650,7 @@ async function main(): Promise<void> {
     ...process.env,
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
     CLAUDE_CODE_ENABLE_TELEMETRY: '0',
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
