@@ -649,6 +649,7 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = {
     ...process.env,
     CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+    CLAUDE_CODE_ENABLE_TELEMETRY: '0',
   };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
