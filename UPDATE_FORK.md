@@ -135,14 +135,34 @@ cd /Users/michielf/Projects/lovelace-agent/nanoclaw
 git fetch origin --prune
 git fetch upstream --prune --tags
 
-# Immutable tag on the exact commit currently deployed.
-git tag -a v1.2.52-lovelace -m "Frozen v1 fork as deployed on EC2 (Bedrock/LiteLLM + Discord)" 1ac21d23
+# Immutable tag on the deployed v1 tree.
+git tag -a v1.2.52-lovelace -m "Frozen v1 fork as deployed on EC2 (Bedrock/LiteLLM + Discord)" <commit>
 git push origin v1.2.52-lovelace
 
 # Long-lived maintenance branch, so security fixes to v1 remain possible.
-git branch v1-maintenance 1ac21d23
+git branch v1-maintenance <commit>
 git push -u origin v1-maintenance
 ```
+
+> **As executed (2026-09-23):** `<commit>` is **`f3050ba5`**, not the deployed
+> `1ac21d23`. `f3050ba5` is `1ac21d23` plus this plan and its script — three files,
+> `+3010` lines, all documentation:
+>
+> ```
+> UPDATE_FORK.md  V2_MIGRATION.md  scripts/fork-v2-rebase.sh
+> ```
+>
+> `git diff --name-only 1ac21d23 v1.2.52-lovelace -- src/ container/ setup/
+> package.json package-lock.json .env.example` is **empty**, so the frozen tree is
+> runtime-identical to what is deployed — `npm install && npm run build` and the
+> container build are unaffected.
+>
+> Why include them: `base` carries assets from `v1-maintenance`, and `promote`
+> replaces `main`'s tree wholesale. Anything not reachable from the frozen branch
+> is silently dropped from `main` at promote — including this document. Freezing
+> the plan alongside the code it describes also makes the rollback ref
+> self-documenting. If you need a tag that is byte-identical to the deployment,
+> `1ac21d23` is still there and still reachable.
 
 Then in `../lovelace-ai`, add a `nanoclawRef` context parameter and pin the
 current stack to `v1.2.52-lovelace` **and deploy that change**, verifying a
