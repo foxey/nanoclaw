@@ -149,6 +149,43 @@ managing the volume, so nothing re-applies the tag. **Verify the tag exists on
 the live volume before relying on daily snapshots**, and take an explicit
 snapshot regardless.
 
+**2.8a Instance replacement hits two bootstrap failures — both now fixed in the
+IaC (verified 2026-09-24 on the pin deploy).** Any deploy that changes UserData
+replaces the instance, and the *first two* replacements since the stack was
+created exposed latent bugs:
+
+1. **EBS self-attach deadlock.** The old (outgoing) instance still holds the
+   RETAIN data volume during replacement — CloudFormation keeps it alive until
+   the new one signals — so the new instance's single `attach-volume` failed
+   `VolumeInUse`, the 120s device-wait loop then timed out, and the whole deploy
+   rolled back. Fixed: UserData now detaches the volume from its current holder
+   (graceful → `--force`), waits for `available`, and retries the attach; the
+   role gained `ec2:DetachVolume`. (`lib/nanoclaw-ec2-stack.ts`.)
+2. **rpm-lock / GPG race in Node install.** On a fresh AL2023 boot, first-boot
+   `dnf` activity holds `/var/lib/rpm/.rpm.lock`; when `10-install-nodejs.sh`
+   reached NodeSource's GPG-key import it failed *"can't create transaction lock
+   … Resource temporarily unavailable" → "GPG check FAILED"*. A boot-timing race
+   the long-running original instance never hit. Fixed: the script now waits for
+   the rpm/dnf lock to clear and retries the install up to 5×.
+
+**Failed-deploy recovery for the live instance.** The self-heal detaches the
+volume from the *running* old instance. On a **successful** deploy that's
+fine (the old instance is being torn down). On a **failed** deploy that rolls
+back, CloudFormation keeps the old instance but does **not** re-run its UserData,
+so it is left running **without its data volume** — nanoclaw goes `inactive`
+because `/data/nanoclaw` is gone. Recover manually (verified working):
+
+```bash
+export AWS_REGION=eu-central-1 AWS_PROFILE=isengard-aiml
+# volume will be 'available' after the rollback detached it
+aws ec2 attach-volume --volume-id vol-… --instance-id <old-instance> --device /dev/xvdf
+aws ec2 wait volume-in-use --volume-ids vol-…
+ssh ec2-user@<ip> 'sudo mount -a && sudo systemctl start nanoclaw'
+```
+
+The pre-deploy snapshot (Phase 1) is the backstop if the volume itself is ever
+harmed; in practice the rollback leaves it clean and `available`.
+
 **2.9 State on the ephemeral root volume.** Not on `/data/nanoclaw`, lost on
 instance replacement:
 
