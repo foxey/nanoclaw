@@ -199,7 +199,14 @@ Two things live only on the instance and are invisible in this diff:
 
 - `~/.config/nanoclaw/mount-allowlist.json` and `sender-allowlist.json` — outside
   `PROJECT_ROOT` by design, on the **ephemeral root volume**. Copy them off the
-  instance before you touch anything.
+  instance before you touch anything, *if they exist*.
+  > **Verified 2026-09-23 on 18.197.157.221: neither file exists.**
+  > `~/.config/nanoclaw/` is absent entirely (only `~/.config/git/`). The code
+  > treats absence as the locked-down default — `mount-security.js` blocks all
+  > additional mounts when the file is missing; `sender-allowlist.js` falls back
+  > to `{ allow: '*', mode: 'trigger' }`. So on this deployment there is nothing
+  > here to back up, and an instance rebuild loses nothing. Re-check if you ever
+  > add a real allowlist.
 - `groups/*/CLAUDE.md` on `/data/nanoclaw/groups` — the actual agent memory. The
   repo no longer tracks these; the volume is the only copy.
 
@@ -584,7 +591,8 @@ Freeze:
 - [ ] `v1-maintenance` branch pushed and protected
 - [ ] `nanoclawRef` context parameter added to the CDK stack, pinned to
       `v1.2.52-lovelace`, **deployed and verified**
-- [ ] `~/.config/nanoclaw/*-allowlist.json` copied off the instance
+- [x] `~/.config/nanoclaw/*-allowlist.json` — **verified absent on the live box,
+      nothing to copy** (§4.1)
 - [ ] `/data/nanoclaw` snapshot confirmed (see V2_MIGRATION.md §7)
 
 Rebase:
