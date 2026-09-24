@@ -177,13 +177,13 @@ script still exits 0. It is also already redundant — the fork committed the sa
 change. **Delete the patch and add an explicit assertion instead** (§6.3).
 
 **2.12 Model coverage — worse on v2.4.0.** LiteLLM registers exactly one model,
-`claude-sonnet-4-6` (`bootstrap/30-install-litellm.sh`), and the IAM policy covers
-only sonnet-4-6 inference profiles. Three ways that bites:
+`claude-sonnet-5` (`bootstrap/30-install-litellm.sh`), and the IAM policy covers
+only the sonnet-5 inference profile. Three ways that bites:
 
 - **v2.4.0 moves the unset-model default to Opus 5.5.** Any migrated group with no
   model of its own will ask LiteLLM for Opus, which it does not serve. This is the
   most likely cause of a migration that completes cleanly and then answers nothing.
-  **Pin `NANOCLAW_DEFAULT_MODEL=claude-sonnet-4-6` in `.env`** (a group's own model
+  **Pin `NANOCLAW_DEFAULT_MODEL=claude-sonnet-5` in `.env`** (a group's own model
   still wins). Both new knobs are read from the host `.env` when `container.json`
   is materialized, so a change takes effect at the next container start — no host
   restart needed.
@@ -731,7 +731,7 @@ Responsibilities, in order:
 3. Real directories + `/etc/fstab` bind mounts per §5(a), then `mount -a`
 4. `corepack enable`; `pnpm install --frozen-lockfile`; `pnpm run build`
 5. Write `.env`: `ANTHROPIC_BASE_URL=http://host.docker.internal:4000`,
-   **`NANOCLAW_DEFAULT_MODEL=claude-sonnet-4-6`** (§2.12 — without this, v2.4.0
+   **`NANOCLAW_DEFAULT_MODEL=claude-sonnet-5`** (§2.12 — without this, v2.4.0
    groups ask for Opus 5.5 and LiteLLM 400s), `DISCORD_BOT_TOKEN` from Secrets
    Manager, `ASSISTANT_NAME`, `TRIGGER_WORD`, `ONECLI_URL=http://172.17.0.1:10254`,
    `TZ`. **Do not write `ANTHROPIC_AUTH_TOKEN`** — the provider (v2.3.0) or the

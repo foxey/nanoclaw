@@ -286,12 +286,12 @@ two install-wide knobs read from `.env`:
 - `NANOCLAW_FAST_MODE=1` — fast serving tier at a higher per-token price
 
 `bootstrap/30-install-litellm.sh` registers exactly one `model_name`
-(`claude-sonnet-4-6`), and the Bedrock IAM policy only covers sonnet-4-6
+(`claude-sonnet-5`), and the Bedrock IAM policy only covers sonnet-5
 inference profiles. So on a v2.4.0 base an unpinned group asks LiteLLM for a
 model it does not serve. **Set the model explicitly:**
 
 ```bash
-NANOCLAW_DEFAULT_MODEL=claude-sonnet-4-6    # must match LiteLLM's model_name
+NANOCLAW_DEFAULT_MODEL=claude-sonnet-5    # must match LiteLLM's model_name
 ```
 
 Leave `NANOCLAW_FAST_MODE` unset. If you do want Opus, that is a three-place

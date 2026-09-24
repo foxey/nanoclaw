@@ -81,7 +81,7 @@ ANTHROPIC_BASE_URL_DEFAULT="${FORK_V2_BASE_URL:-http://host.docker.internal:4000
 # Model the agent groups should use. Upstream moved the unset-model default to
 # Opus 5.5 after v2.3.0; our LiteLLM registers exactly one model name, so leaving
 # this blank means the agent asks for a model the proxy does not serve. Pin it.
-DEFAULT_MODEL="${FORK_V2_DEFAULT_MODEL:-claude-sonnet-4-6}"
+DEFAULT_MODEL="${FORK_V2_DEFAULT_MODEL:-claude-sonnet-5}"
 
 # Fork assets carried forward verbatim (UPDATE_FORK.md §4 item 6), plus the
 # migration plan and this script itself — `promote` replaces main's tree with the
