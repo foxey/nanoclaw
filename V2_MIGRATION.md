@@ -682,6 +682,31 @@ Do these as reviewable commits, in this order. `test/nanoclaw-ec2.test.ts` (633
 lines of template assertions) will need updating alongside — it asserts instance
 type, volume sizes, UserData contents, and the CreationPolicy.
 
+> ### As-built (2026-09-25) — items 1, 2, 4 done; deviations noted
+>
+> Items 1, 2, and 4 are implemented and committed to `../lovelace-ai` (`main`).
+> Two structural decisions changed the shape of the literal list below; the
+> per-item notes call out where each one deviates.
+>
+> **Deviation A — one context-gated stack, not an always-v2 stack.** Rather than
+> bump `NanoclawEc2Stack` to the v2 config outright (which would force yet
+> another live-v1 instance replacement and drop v1 as a clean rollback), the
+> stack takes a `deployTarget` context: `v1` (default) keeps today's config
+> byte-for-byte; `deployTarget=v2` switches to the v2 config. A v1 `cdk diff` is
+> clean — confirmed. The capacity numbers in item 2 apply on the v2 branch only.
+> Extra context: `nanoclawV2Ref` (default `v2.4.0-lovelace`) and `freshV2`
+> (green-field service auto-start per §8).
+>
+> **Deviation B — the v2 installer ships in a separate S3 asset.** Because
+> `userDataCausesReplacement` hashes UserData (which embeds the bootstrap asset
+> key), *any* change to `bootstrap/` forces a v1 replacement. So `bootstrap/`
+> stays frozen (05..50) and `60-install-nanoclaw-v2.sh` lives in a new
+> `bootstrap-v2/`, published + downloaded only when `deployTarget=v2`. Both
+> assets unzip into `/tmp/bootstrap`; the shared 05..30 scripts come from the
+> frozen v1 asset, guaranteeing identical infra on both paths.
+>
+> **Item 3 is intentionally NOT applied to v1** — see the item-3 note below.
+
 **1. `lib/nanoclaw-ec2-stack.ts` — ref pinning (ship this first, on its own)**
 
 ```typescript
@@ -710,17 +735,24 @@ now gets moved to the requested ref instead of being skipped.
 
 **3. `bootstrap/50-install-nanoclaw.sh` — delete the source patch (§2.11)**
 
-Remove the `node -e` block entirely. Replace with an assertion that the
-configuration it was faking is actually present:
+> **As-built: NOT applied to v1 — folded into the v2 installer instead.** Under
+> Deviation B `bootstrap/` is a frozen asset: editing `50-install-nanoclaw.sh`
+> changes its hash and forces a live-v1 instance replacement. The dead `node -e`
+> patch is already a harmless no-op on the running v1 (it matches nothing and
+> exits 0), so removing it buys nothing operationally while costing the clean-v1
+> guarantee. It is left as-is. The equivalent loud assertions live in the **v2**
+> installer (`bootstrap-v2/60-install-nanoclaw-v2.sh`), which is where the LLM
+> endpoint + registered provider actually matter:
+>
+> ```bash
+> grep -q '^ANTHROPIC_BASE_URL=' /opt/nanoclaw-v2/.env || { echo "FAILED: ANTHROPIC_BASE_URL missing"; exit 1; }
+> grep -q "import './claude.js'" /opt/nanoclaw-v2/src/providers/index.ts || { echo "FAILED: claude provider not registered"; exit 1; }
+> ```
 
-```bash
-grep -q '^ANTHROPIC_BASE_URL=' .env || { echo "FAILED: ANTHROPIC_BASE_URL missing from .env"; exit 1; }
-grep -q "import './claude.js'" src/providers/index.ts \
-  || { echo "FAILED: claude provider not registered — custom endpoint will not reach containers"; exit 1; }
-```
-
-Fail loudly. A silent no-op here means agents come up with no LLM endpoint and
-you find out from a user, not from CloudFormation.
+Original intent (kept for the record): remove the `node -e` block entirely and
+replace it with an assertion that the configuration it was faking is present.
+Fail loudly — a silent no-op means agents come up with no LLM endpoint and you
+find out from a user, not from CloudFormation.
 
 **4. New `bootstrap/60-install-nanoclaw-v2.sh`**
 
@@ -801,25 +833,55 @@ Everything must be idempotent; bootstrap re-runs on every instance replacement.
 
 **5. `bootstrap/30-install-litellm.sh` — model coverage (§2.12)**
 
-Decide on haiku. If yes: add it to `model_list` and extend the Bedrock IAM
-statement to the haiku inference profile. Also decide on
-`LITELLM_MASTER_KEY` (UPDATE_FORK.md §5.3a); if you adopt it, add a
-`nanoclaw/litellm-master-key` secret, grant read, and feed it to
-`NANOCLAW_ANTHROPIC_AUTH_TOKEN`.
+> **Reframed after the §9 spike.** Haiku coverage is **not** needed for the
+> agent: v2 pins `NANOCLAW_DEFAULT_MODEL=claude-sonnet-5`, which LiteLLM serves
+> and IAM permits, so a migrated group with no model of its own answers fine
+> (proven end-to-end in the spike). The only surface that requests Haiku today
+> is **interactive Claude Code on the host** via the `~/.bashrc`
+> `ANTHROPIC_DEFAULT_HAIKU_MODEL` export, which the IAM policy does not permit
+> (AccessDenied). That never touches the agent.
+>
+> **Cheapest fix — pin narrow (recommended for the migration):** leave LiteLLM
+> and the Bedrock IAM single-model, and **remove (or correct) the stale
+> `~/.bashrc` Haiku export** so interactive Claude Code stops erroring. No new
+> IAM surface, no `model_list` change.
+>
+> **Widen (optional, post-migration):** only if you want a cheap Haiku tier
+> available (interactively, or for a group you deliberately point at Haiku) —
+> add it to `model_list` **and** extend the Bedrock IAM statement to the Haiku
+> inference profile. Tie this to the complexity-routing question, which is
+> explicitly deferred to post-migration.
+>
+> **`LITELLM_MASTER_KEY` — not required (spike 1).** The gateway reports
+> ready/applied and the model answers with no Anthropic secret registered, so a
+> master key stays *optional*, not mandatory. If ever adopted (UPDATE_FORK.md
+> §5.3a): add a `nanoclaw/litellm-master-key` secret, grant read, feed it to
+> `NANOCLAW_ANTHROPIC_AUTH_TOKEN` — and note the gateway then needs a matching
+> host secret so its injected `Authorization` header carries the key (§9 item 2).
 
 **6. Two new ops scripts in `bin/` — the current gap**
 
-- `bin/nanoclaw-backup.sh` — stop the service, `tar` `data/`, `groups/`,
-  `store/`, `.env`, and `~/.config/nanoclaw/`, to
+> **Split into two decisions.** These are day-2 ops tools, not part of standing
+> up v2, and they live in the **fork's** `bin/` (shipped in the checkout,
+> alongside `ada-connect.sh`), not in `../lovelace-ai`. The backup half is
+> unambiguously worth having; the update half overlaps with upstream's
+> `/update-nanoclaw` and is really only for scripted/simple bumps.
+
+- `bin/nanoclaw-backup.sh` — **build it.** Stop the service, `tar` `data/`,
+  `groups/`, `store/`, `.env`, and `~/.config/nanoclaw/`, to
   `/data/nanoclaw-v2/backups/nanoclaw/<ts>/`, restart. Skip
   `data/ncl.sock` (`/update-nanoclaw` omits sockets from its snapshots for the
-  same reason).
-- `bin/nanoclaw-update.sh` — the wrapper described in
-  `docs/upgrade-recovery.md`: backup → `git fetch`/`checkout <ref>` →
-  `pnpm install` → build → `pnpm run migrate` → `container/build.sh` →
-  `upgrade-state.ts set` → restart → health-check → roll back on failure. For
-  anything non-trivial, prefer running `/update-nanoclaw` over SSH; it already
-  does the worktree staging, skill refresh, and automatic rollback.
+  same reason). This is the on-demand, service-quiesced, file-level backup v1
+  never had (the DLM snapshots are block-level and scheduled).
+- `bin/nanoclaw-update.sh` — **decide first: build vs. just use
+  `/update-nanoclaw`.** The wrapper described in `docs/upgrade-recovery.md`:
+  backup → `git fetch`/`checkout <ref>` → `pnpm install` → build →
+  `pnpm run migrate` → `container/build.sh` → `upgrade-state.ts set` → restart →
+  health-check → roll back on failure. For anything non-trivial, prefer running
+  `/update-nanoclaw` over SSH; it already does the worktree staging, skill
+  refresh, and automatic rollback. A thin scripted wrapper is still useful for
+  simple, unattended ref bumps — but the marker stamp (`upgrade-state.ts set`,
+  §4.1) is the load-bearing step either way.
 
 **7. README + `.kiro/specs`**
 
