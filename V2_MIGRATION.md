@@ -727,8 +727,17 @@ you find out from a user, not from CloudFormation.
 Responsibilities, in order:
 
 1. `mkdir -p /data/nanoclaw-v2/{data,groups,logs}`, chown `ec2-user`
-2. Clone `$NANOCLAW_REPO` to `/opt/nanoclaw-v2`, `git checkout --detach $NANOCLAW_V2_REF`
-3. Real directories + `/etc/fstab` bind mounts per §5(a), then `mount -a`
+2. Clone `$NANOCLAW_REPO` to `/opt/nanoclaw-v2`, then detach to the ref. **Resolve
+   the ref to a SHA first** — `git checkout --detach <branch>` fails with
+   `'--detach' cannot be used with -b` for a *branch* ref (§9 spike). Use
+   `SHA=$(git rev-parse --verify "origin/$NANOCLAW_V2_REF^{commit}" || git
+   rev-parse --verify "$NANOCLAW_V2_REF^{commit}"); git checkout --detach "$SHA"`.
+   A tag (`v2.4.0-lovelace`) is unaffected, but keep the SHA form so a branch ref
+   can't break the bootstrap.
+3. Real directories + `/etc/fstab` bind mounts per §5(a), then `mount -a`.
+   Make the state-volume mount idempotent for re-runs: `mountpoint -q <mnt> ||
+   mount …` — `mount` returns non-zero when already mounted and aborts under
+   `set -e` on an instance replacement (§9 spike).
 4. `corepack enable`; `pnpm install --frozen-lockfile`; `pnpm run build`
 5. Write `.env`: `ANTHROPIC_BASE_URL=http://host.docker.internal:4000`,
    **`NANOCLAW_DEFAULT_MODEL=claude-sonnet-5`** (§2.12 — without this, v2.4.0
@@ -750,7 +759,21 @@ Responsibilities, in order:
    `.claude/skills/add-onecli/versions.json` on v2.4.0, core `versions.json` on
    v2.3.0 (§4.3), and **fail if the pin is absent** rather than defaulting to
    `latest`. Ensure the volume symlink hack is in place *before* compose creates
-   the named volumes.
+   the named volumes. **Two prerequisites the §9 spike proved are load-bearing —
+   miss either and the gateway can't serve credentialed egress:**
+   - **`app-data` ownership.** After the symlink hack but *before* compose starts
+     the `onecli` service, `chown -R 1000:1000 <ebs>/onecli/app-data` — the
+     container runs as `node` (uid 1000) and otherwise dies with `can't create
+     /app/data/secret-encryption-key: Permission denied` (unhealthy → install
+     fails). `pgdata` needs no chown.
+   - **`host.docker.internal` resolution inside the gateway container.** On Linux
+     the gateway compose needs `extra_hosts: ["host.docker.internal:host-gateway"]`
+     on the `onecli` service, or every proxied agent→LiteLLM call fails
+     (`Empty reply` / `dns error: Name does not resolve`). The skill's
+     `setup.ts` (`ensureLocalGatewayHostAccess`) does this when its install path
+     runs; if the bootstrap installs the gateway another way, replicate it and
+     recreate the container. This is because the contributed proxy env carries
+     **no `NO_PROXY`**, so LiteLLM traffic goes *through* the gateway (§9 item 2).
 8. Auth step — `--step gateway` then `--step gateway-auth` on v2.4.0,
    `--step auth` on v2.3.0, with `NANOCLAW_ANTHROPIC_BASE_URL` /
    `NANOCLAW_ANTHROPIC_AUTH_TOKEN` exported
@@ -861,22 +884,87 @@ looking a lot like B with extra steps.
 
 Ordered by how much they'd hurt if the answer is the bad one.
 
-0. **v2.4.0 — does the gateway skill apply cleanly on the EC2 instance, and does
-   the host boot with it registered?** This is now the first thing that can stop
-   the migration dead (§2.4, §2.4a), and it is new since the plan was written.
-   Verify on a scratch instance: apply `/add-onecli`, confirm
-   `src/gateway-providers/installed.ts` carries the import, start the host, and
-   check the log for successful gateway initialization.
-1. **Does the gateway report ready when no Anthropic secret is registered?** If
-   not, every spawn throws (§2.4) and the LiteLLM-master-key option becomes
-   mandatory rather than preferred. Test on a scratch instance, not in the window.
-2. **Does the OneCLI proxy intercept plain-HTTP `host.docker.internal:4000` and
-   inject the `Authorization` header?** If the gateway's contributed `NO_PROXY`
-   covers `host.docker.internal`, it does not — fine for an unauthenticated
-   LiteLLM, fatal for a keyed one.
-3. **Does the container actually reach LiteLLM at all under v2's driver?** The
-   fork used to add `NO_PROXY` by hand; `src/providers/claude.ts` does not. Run
-   the container-side curl from Phase 7 against port 4000, not just 10254.
+> ### Spike results — items 0–3 answered (2026-09-24, on a throwaway v2 stack)
+>
+> Run on a deliberately isolated CDK stack (`NanoclawSpikeStack`, own blank
+> volume, no Discord, no budget — never touches the live stack or
+> `vol-0014aca44c3193e99`) against the fork at `v2-base` (`9962a59c`,
+> `v2.4.0`-equivalent), OneCLI gateway `1.41.0` + `@onecli-sh/sdk@2.2.1`, the
+> same LiteLLM→Bedrock topology as production. IaC lives in `../lovelace-ai`
+> (`lib/nanoclaw-spike-stack.ts`, `bootstrap-spike/`).
+>
+> **The v2 OneCLI credential path is viable against our unauthenticated,
+> host-local LiteLLM. No LiteLLM master key is required.** Two concrete
+> bootstrap gaps must be closed first (both fold into §7.2 item 4 / §5):
+>
+> **A. The OneCLI gateway container must be able to resolve
+> `host.docker.internal`.** Out of the box its compose has no `extra_hosts`;
+> inside the container `getent hosts host.docker.internal` returns nothing, and
+> every proxied agent→LiteLLM call fails (`Empty reply` with no matching secret,
+> `dns error: Name does not resolve` with one). Fix: `extra_hosts:
+> ["host.docker.internal:host-gateway"]` on the `onecli` service, then recreate
+> it. This is exactly what `.claude/skills/add-onecli/scripts/setup.ts`
+> (`ensureLocalGatewayHostAccess` / `withLinuxHostGateway`) already does on
+> Linux — but only when its gateway-install step runs to completion. A
+> hand-rolled bootstrap that installs the gateway another way must replicate it.
+>
+> **B. The gateway's `app-data` volume must be owned by uid 1000 (`node`).** The
+> persistence hack that symlinks `/var/lib/docker/volumes/onecli_app-data/_data`
+> onto the EBS pre-creates the backing dir as `root`, but the `onecli` container
+> runs as `node` (uid 1000) and dies with `can't create
+> /app/data/secret-encryption-key: Permission denied` → container unhealthy →
+> install fails. Fix: `chown -R 1000:1000 <ebs>/onecli/app-data` before compose
+> brings the gateway up. (`pgdata` is fine — Postgres chowns its own.)
+>
+> With A and B in place: gateway healthy, host boots with the provider
+> registered, and a real `claude-sonnet-5` completion returns 200 through the
+> proxy with no Anthropic secret registered (details per item below).
+>
+> Not blockers, but confirmed en route: `better-sqlite3`'s ignored build script
+> (pnpm `onlyBuiltDependencies`) is harmless — it loads from a prebuilt binary;
+> `docker-compose v5.1.2` installs fine (the gateway's "needs ≥ 2.19" hint on
+> failure is a red herring); and `git checkout --detach <branch>` fails
+> (`'--detach' cannot be used with -b`) for a **branch** ref — resolve the ref to
+> a SHA first (`rev-parse origin/<ref>^{commit}`). A tag ref (our
+> `v2.4.0-lovelace`) is unaffected, but any branch ref in the v2 bootstrap hits
+> this.
+
+0. **✅ ANSWERED — YES.** The `/add-onecli` directives (copy `onecli.ts` /
+   `onecli-files.ts`, append `import './onecli.js';` to
+   `src/gateway-providers/installed.ts`, install `@onecli-sh/sdk@2.2.1`, build,
+   validate) all applied cleanly; only the gateway-*container* bring-up failed,
+   for the two infra reasons above (A, B) — not the skill. After fixing those and
+   stamping the upgrade marker (§4.1, `scripts/upgrade-state.ts set`, otherwise
+   the tripwire stops boot — confirmed), the host boots with `Gateway provider
+   selected gatewayProvider="onecli"`, migrations run, `NanoClaw running`,
+   `ncl.sock` present. Original text (still the procedure):
+   ~~does the gateway skill apply cleanly on the EC2 instance, and does the host
+   boot with it registered?~~ (§2.4, §2.4a).
+1. **✅ ANSWERED — YES, ready with no Anthropic secret.** With `/v1/secrets` empty,
+   `getContainerConfig({agent})` does **not** throw; it returns a full config and
+   injects `ANTHROPIC_API_KEY=placeholder`. A real `/v1/messages` completion
+   (`claude-sonnet-5`) returned 200 through the proxy with no Anthropic secret
+   registered. So spawns do **not** throw (§2.4 fear does not materialise) and the
+   **LiteLLM-master-key option stays optional, not mandatory.** A registered
+   secret only matters for the credentialed-egress side (item 2, keyed case).
+2. **✅ ANSWERED — YES, it intercepts; there is no `NO_PROXY` at all.**
+   `getContainerConfig().env` sets both `HTTP_PROXY` and `HTTPS_PROXY` (upper- and
+   lower-case) to `http://x:<agent-token>@host.docker.internal:10255`, plus
+   `NODE_USE_ENV_PROXY=1` and the gateway CA (`NODE_EXTRA_CA_CERTS` /
+   `SSL_CERT_FILE` / `DENO_CERT`). It contributes **no** `NO_PROXY`, so *all*
+   agent egress — including plain-HTTP to `host.docker.internal:4000` — routes
+   through the gateway, which MITMs it (`scheme=http`, `injections_applied=1`,
+   status 200). The §2 fear was inverted: the risk is not that `NO_PROXY` excludes
+   LiteLLM, it's that **everything** goes through the proxy, so the gateway *must*
+   reach LiteLLM (prerequisite A). Harmless for our unauthenticated LiteLLM (the
+   injected `Authorization` header is ignored); for a keyed LiteLLM a matching
+   host secret is what supplies that header.
+3. **✅ ANSWERED — YES (same evidence as item 2).** Under v2's driver the agent
+   container reaches LiteLLM through the injected `HTTP_PROXY`; `NO_PROXY` is not
+   needed and not set. Verified with a `docker run` curl (with the contributed
+   proxy env + `--add-host=host.docker.internal:host-gateway`) hitting
+   `/health`, `/v1/models`, and `/v1/messages` on :4000 — all 200 once
+   prerequisite A is in place.
 4. **Agent image build on `t3.large`** — time it and watch memory. If it OOMs or
    blows the signal timeout, the fallback is `NANOCLAW_HARDENED_IMAGE=true` with
    `NANOCLAW_AGENT_IMAGE_REF`, but note the pinned image is ~800 MB served from
@@ -910,7 +998,10 @@ Pre-work:
 - [ ] UPDATE_FORK.md §3 (v1 frozen, `nanoclawRef` deployed) — hard prerequisite
 - [ ] Base tag confirmed newest (UPDATE_FORK.md §10) — **`v2.4.0`**
 - [ ] UPDATE_FORK.md §6 (`v2.4.0-lovelace` builds and tests clean)
-- [ ] §9 items **0**–3 answered on a scratch instance
+- [x] §9 items **0**–3 answered on a scratch instance (2026-09-24 — all YES; two
+      bootstrap prerequisites surfaced: gateway `app-data` chown to uid 1000, and
+      `host.docker.internal:host-gateway` in the onecli compose. Folded into §7.2
+      item 4 step 7.)
 - [ ] §7.2 changes 1–4 merged, including the gateway-materialization step (§2.4a)
       and the `NANOCLAW_DEFAULT_MODEL` pin (§2.12); `test/nanoclaw-ec2.test.ts`
       updated; `cdk diff` reviewed
