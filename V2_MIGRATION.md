@@ -946,6 +946,63 @@ looking a lot like B with extra steps.
 
 Ordered by how much they'd hurt if the answer is the bad one.
 
+> ### Option 1 result — v2 bootstrap proven UNATTENDED (2026-09-26)
+>
+> Ran the **real production v2 code path** on a throwaway, isolated stack
+> (`NanoclawV2ProveStack`, `lib/nanoclaw-v2-prove-stack.ts` — own blank DESTROY
+> volume, no Discord, no budget, no DLM; `deployTarget=v2`, `freshV2=true`,
+> `t3.large` + 60 GiB root + PT45M; the frozen `bootstrap/` 05..30 asset +
+> `bootstrap-v2/60`). Pinned to `v2-base` (`543a8b66`; pushed to origin first).
+> Never touched the live stack or `vol-0014aca44c3193e99` (verified `in-use`,
+> untouched, before and after; throwaway volume gone on teardown).
+>
+> **A fresh `cdk deploy` reached `CREATE_COMPLETE` — the bootstrap signalled
+> success on its own within PT45M (~8–9 min total), no manual intervention.**
+> Slug resolved to `2e602aa0` exactly as predicted. Verified on the box: service
+> `active`, `data/ncl.sock` present, `installed.ts` imports `./onecli.js`,
+> gateway container `healthy`, agent image `nanoclaw-agent-v2-2e602aa0:latest`
+> built, **no webhook on :3000** (Discord absent), LiteLLM on :4000, upgrade
+> marker stamped (`2.4.0`/`543a8b66`), and a real `claude-sonnet-5`
+> `/v1/messages` returned a Bedrock `msg_bdrk_…` completion. §9 items 4 and 6
+> answered above; item 10's model default holds (LiteLLM serves the pinned
+> `claude-sonnet-5`).
+>
+> **The first automated run FAILED and surfaced four real defects in
+> `bootstrap-v2/60-install-nanoclaw-v2.sh`** (which had only ever been
+> `bash -n`-checked). All four are now fixed and committed, and the corrected
+> script is what produced the clean unattended `CREATE_COMPLETE` above:
+>
+> 1. **`corepack enable` ran as `ec2-user` → `EACCES` writing `/usr/bin/pnpm`.**
+>    The frozen v1 `bootstrap/10-install-nodejs.sh` (shared 05..30 asset) is
+>    npm-only and does not enable corepack; the *spike's* `10` did, as root, which
+>    is why the spike never hit this. Fix: `60` now runs `corepack enable` +
+>    `corepack prepare pnpm@latest --activate` **as root** before the
+>    `sudo -u ec2-user … pnpm install`.
+> 2. **Gateway `app-data` reset to `root:root` by Docker's named-volume init,
+>    *during* the skill's compose bring-up** → the `onecli` container (uid 1000)
+>    can't write `secret-encryption-key` → unhealthy → the skill-driver exits
+>    non-zero. The step-1 pre-create `chown 1000:1000` does **not** survive Docker
+>    populating the fresh volume. Fix: `60` tolerates the skill's non-zero exit
+>    (still hard-asserting the `installed.ts` import landed), then `chown` again
+>    **after** the skill and brings the gateway up itself with a bounded
+>    health-gated wait.
+> 3. **`host.docker.internal:host-gateway` was NOT added by the skill on
+>    `v2-base`** (compose had no `extra_hosts`; the container couldn't resolve the
+>    name). `60`'s defensive awk-repair block (matches `container_name: onecli`)
+>    handles it — confirmed firing in the unattended run
+>    (`Gateway compose missing host-gateway mapping — adding it`).
+> 4. **The `grep "import './claude.js'" src/providers/index.ts` assertion was
+>    wrong for v2.4.0/`v2-base`.** That barrel only lists providers with
+>    host-side needs and explicitly excludes claude ("Providers with no host
+>    needs (claude) don't appear here"). The claude contract lives at
+>    `src/provider-contracts/claude.ts` and `provider-name.ts` defaults to
+>    `'claude'`. Fix: assert the contract file exists instead.
+>
+> Also fixed a related pin gap: `60` now reads `onecli-gateway` from
+> `.claude/skills/add-onecli/versions.json` (→ `1.41.0`) and passes
+> `ONECLI_VERSION` to its repair `compose up` calls, so they can't silently run
+> `latest` (§4.3). The skill's own bring-up already pins correctly.
+>
 > ### Spike results — items 0–3 answered (2026-09-24, on a throwaway v2 stack)
 >
 > Run on a deliberately isolated CDK stack (`NanoclawSpikeStack`, own blank
@@ -1027,8 +1084,16 @@ Ordered by how much they'd hurt if the answer is the bad one.
    proxy env + `--add-host=host.docker.internal:host-gateway`) hitting
    `/health`, `/v1/models`, and `/v1/messages` on :4000 — all 200 once
    prerequisite A is in place.
-4. **Agent image build on `t3.large`** — time it and watch memory. If it OOMs or
-   blows the signal timeout, the fallback is `NANOCLAW_HARDENED_IMAGE=true` with
+4. **✅ ANSWERED — builds fast, no OOM.** On a `t3.large`, `container/build.sh`
+   completed in **~1m48s** with a **peak of ~1.45 GB / 7.8 GB RAM** — no OOM, wide
+   headroom, no `NANOCLAW_HARDENED_IMAGE` fallback needed. Chromium was found in
+   the base image, Bun/pnpm resolved cleanly, and the image tagged
+   `nanoclaw-agent-v2-2e602aa0:latest` (slug-derived, coexists with v1's image).
+   Whole bootstrap (05→60, incl. this build) ran unattended in **~8–9 min**, far
+   inside PT45M. (Option 1, 2026-09-26.) Original text kept for the pull-path
+   fallback should it ever be needed:
+   ~~time it and watch memory. If it OOMs or blows the signal timeout, the
+   fallback is `NANOCLAW_HARDENED_IMAGE=true`~~ with
    `NANOCLAW_AGENT_IMAGE_REF`, but note the pinned image is ~800 MB served from
    `us-east-1` with no CDN, upstream says the pull from Europe can be slower than
    building, and the NanoClaw-account path is gated behind
@@ -1037,8 +1102,11 @@ Ordered by how much they'd hurt if the answer is the bad one.
 5. **`versions.json` `agent-image` is a single reference, not a per-platform
    map** — confirm it is `linux/amd64` before considering the pull path. (Our
    instance is x86_64, so this is a "check, don't assume".)
-6. **Does the webhook server start?** (§2.13) Discord shouldn't trigger it. Verify
-   with `ss -ltnp`.
+6. **✅ ANSWERED — NO, it does not.** With Discord absent (host logged
+   `Channel credentials missing, skipping channel="discord"`), `ss -ltn` showed
+   **nothing on :3000** — the webhook server never binds without a channel
+   registering raw routes. `data/ncl.sock` and `data/cli.sock` are the only
+   listeners the host opens; LiteLLM holds :4000. (§2.13; Option 1, 2026-09-26.)
 7. **`request_approval` needs a working approval delivery path.** v2's Discord
    defaults are `dm: request_approval` / `group: mention-sticky`. Confirm
    approval cards actually reach you before tightening
@@ -1089,5 +1157,8 @@ Post:
 - [ ] v1 unit and image removed; `/data/nanoclaw/store` **kept** (only chat history)
 - [ ] Instance resized back if the numbers support it
 - [ ] `bin/nanoclaw-backup.sh` + `bin/nanoclaw-update.sh` committed and exercised once
-- [ ] Fresh `cdk deploy` into a throwaway stack proves the v2 bootstrap works unattended
+- [x] Fresh `cdk deploy` into a throwaway stack proves the v2 bootstrap works
+      unattended — done 2026-09-26 (`NanoclawV2ProveStack`, `v2-base`,
+      `CREATE_COMPLETE` in ~8–9 min; four `60` defects found + fixed en route).
+      See the "Option 1 result" block at the top of §9.
 - [ ] README and `.kiro/specs` updated; stale sections fixed
