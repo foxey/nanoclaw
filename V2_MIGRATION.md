@@ -502,26 +502,40 @@ on the pre-replacement v1 box).
 
 Rationale: `migrate-v2.sh` is strictly read-only against v1 — it queries the v1
 SQLite via the *v2 checkout's* tsx and opens the DB `{ readonly: true }`; it
-never `pnpm install`s or builds the v1 tree. The RETAIN data volume
-self-reattaches, so the re-cloned tree's committed `store`/`groups`/`logs`
-symlinks resolve onto the **real** v1 state on `/data/nanoclaw/*` (not a copy).
-This keeps the clean rollback intact (v1 state never mutated; flip back is a
-service restart). Option (b) would run v2 migration logic against the live box
-the stack is about to discard, weakening that guarantee; it only wins in a
-non-replacement / long-lived-instance model, which this stack is not.
+never `pnpm install`s or builds the v1 tree. This keeps the clean rollback
+intact (v1 state never mutated; flip back is a service restart). Option (b)
+would run v2 migration logic against the live box the stack is about to discard,
+weakening that guarantee; it only wins in a non-replacement / long-lived-
+instance model, which this stack is not.
+
+> **CRITICAL volume-layout fact (learned the hard way, 2026-10-02 dry run).**
+> `bootstrap-v2/60` mounts the RETAIN volume at **`/data/nanoclaw-v2`**, and the
+> volume's filesystem ROOT already holds v1's data
+> (`/data/nanoclaw-v2/{store,groups,data,logs,onecli}` — the same bytes v1 saw at
+> `/data/nanoclaw`). **v2's own state is isolated under `/data/nanoclaw-v2/v2/`**
+> so v2 never shares inodes with (or mutates) v1's dirs. An earlier version of
+> `60` put v2 state at the volume root → v2 `groups`/`data` were the SAME inodes
+> as v1's → `migrate-v2.sh groups.ts` would copy a dir onto itself and the v2
+> service would mutate v1 state. Fixed by the `v2/` subtree. The migrator reads
+> v1 from the **volume ROOT**, never from the `v2/` subtree.
 
 ```bash
-# Precondition: confirm the volume reattached and v1 state is intact FIRST.
-ssh ec2-user@$ADA 'ls -la /data/nanoclaw/store/messages.db \
-  /data/nanoclaw/groups /data/nanoclaw/data/sessions'
+# Precondition: confirm the volume reattached and v1 state is intact at the ROOT.
+ssh ec2-user@$ADA 'sudo ls -la /data/nanoclaw-v2/store/messages.db \
+  /data/nanoclaw-v2/groups /data/nanoclaw-v2/data/sessions'
 # All three must exist. If not, STOP — investigate the reattach (the Phase-1
 # snapshot is the backstop). Do NOT migrate against missing/partial v1 state.
 
-# Re-clone the v1 tree as the migrator's read-only source. No build.
+# Re-clone the v1 tree and point its state symlinks at the volume ROOT (NOT the
+# v2/ subtree). The real v1 .env was on the now-gone root disk — restore the
+# Phase-1 backup copy. No build — the migrator only reads.
 ssh -t ec2-user@$ADA 'bash -lc "
   git clone --branch v1.2.52-lovelace git@github.com:foxey/nanoclaw.git /opt/nanoclaw
-  ls -la /opt/nanoclaw/store/messages.db   # resolves via committed symlink -> /data/nanoclaw/store
+  cd /opt/nanoclaw
+  for d in store groups logs data; do rm -rf \"\$d\"; ln -sfn \"/data/nanoclaw-v2/\$d\" \"\$d\"; done
+  ls -la store/messages.db
 "'
+scp ./backup-v1/env.v1 ec2-user@$ADA:/opt/nanoclaw/.env   # the saved v1 .env
 ```
 
 Then Phase 5 runs with `NANOCLAW_V1_PATH=/opt/nanoclaw`.
