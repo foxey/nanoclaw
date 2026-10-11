@@ -1,11 +1,11 @@
 ---
 name: use-imaprest-rest
-description: Use the imaprest REST API directly with curl or Python — bypasses MCP/OneCLI TLS issues by calling the HTTP endpoint directly. Useful when mcp__imaprest__* tools are unavailable or broken.
+description: Use the imaprest REST API directly with curl or Node — bypasses MCP/OneCLI TLS issues by calling the HTTP endpoint directly. Useful when mcp__imaprest__* tools are unavailable or broken.
 ---
 
-# Use imaprest REST API (curl / Python)
+# Use imaprest REST API (curl / Node)
 
-This skill shows how to call the imaprest REST API directly, without MCP. Useful when the MCP transport has TLS issues (common with OneCLI + undici), when you want to script email operations in Python, or when you need to inspect raw responses.
+This skill shows how to call the imaprest REST API directly, without MCP. Useful when the MCP transport has TLS issues (common with OneCLI + undici), when you want to script email operations in Node, or when you need to inspect raw responses.
 
 **REST base URL**: `http://172.17.0.1:3000/imaprest`
 
@@ -122,50 +122,46 @@ curl -s -X POST "${SMTP_HEADERS[@]}" \
 
 ---
 
-## Python usage
+## Node usage
 
-OneCLI injects Basic Auth automatically when requests route through its proxy. Use the proxy env vars if present:
+OneCLI injects Basic Auth automatically when requests route through its proxy. Node 22 has global `fetch`; honor the proxy env vars with undici's `ProxyAgent` when present:
 
-```python
-import urllib.request
-import urllib.parse
-import json
-import ssl
-import os
+```js
+import { ProxyAgent } from 'undici';
 
-BASE_URL = "http://172.17.0.1:3000/imaprest"
+const BASE_URL = 'http://172.17.0.1:3000/imaprest';
 
-HEADERS = {
-    "X-IMAP-Host": "imap.example.com",
-    "Content-Type": "application/json",
+const HEADERS = {
+  'X-IMAP-Host': 'imap.example.com',
+  'Content-Type': 'application/json',
+};
+
+const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+const dispatcher = proxy ? new ProxyAgent(proxy) : undefined;
+
+async function api(apiPath, method = 'GET', body) {
+  const res = await fetch(BASE_URL + apiPath, {
+    method,
+    headers: HEADERS,
+    body: body ? JSON.stringify(body) : undefined,
+    dispatcher,
+  });
+  return res.json();
 }
 
-proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY", "")
-if proxy:
-    proxy_handler = urllib.request.ProxyHandler({"http": proxy})
-    ctx = ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE"))
-    opener = urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=ctx))
-    urllib.request.install_opener(opener)
+// List mailboxes
+const mailboxes = await api('/mailboxes');
+console.log(mailboxes.map((m) => m.path));
 
-def api(path, method="GET", body=None):
-    url = BASE_URL + path
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, headers=HEADERS, method=method)
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+// List unread messages in INBOX
+const messages = await api('/mailboxes/INBOX/messages?limit=10&unseen=true');
+for (const msg of messages.messages ?? []) {
+  console.log('[' + msg.uid + '] ' + msg.subject + ' — ' + msg.from[0].address);
+}
 
-# List mailboxes
-mailboxes = api("/mailboxes")
-print([m["path"] for m in mailboxes])
-
-# List unread messages in INBOX
-messages = api("/mailboxes/INBOX/messages?limit=10&unseen=true")
-for msg in messages.get("messages", []):
-    print(f"[{msg['uid']}] {msg['subject']} — {msg['from'][0]['address']}")
-
-# Get full message
-msg = api("/mailboxes/INBOX/messages/1234")
-print(msg["text"])
+// Get full message
+const msg = await api('/mailboxes/INBOX/messages/1234');
+console.log(msg.text);
 ```
 
 **Why curl works when MCP/undici does not:** curl uses GET-style forwarding for `http://` URLs through a proxy; Node.js/undici always uses HTTP CONNECT tunneling, which triggers OneCLI's TLS MITM and fails for plain HTTP backends.
@@ -177,7 +173,7 @@ print(msg["text"])
 Fetch the full spec for all endpoints, parameters, and response schemas:
 
 ```bash
-curl -s http://172.17.0.1:3000/imaprest/openapi.json | python3 -m json.tool | less
+curl -s http://172.17.0.1:3000/imaprest/openapi.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s),null,2)))' | less
 ```
 
 The spec documents all security schemes, request/response formats, and is suitable for import into API clients like Insomnia, Postman, or Bruno.
