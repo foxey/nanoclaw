@@ -510,6 +510,39 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
             log.warn('Failed to download attachment', { type: att.type, err });
           }
         }
+        // Fallback: adapters like @chat-adapter/discord build inbound
+        // attachments as { url, ... } with no fetchData(), so the branch above
+        // never runs and the file is never staged. When bytes are still
+        // missing but a public url is present, fetch it directly (Discord CDN
+        // urls carry their own signed query params). Never throw — a bad
+        // attachment must not break message handling.
+        if (entry.data === undefined && typeof att.url === 'string' && att.url.length > 0) {
+          let urlHost = 'unknown';
+          try {
+            urlHost = new URL(att.url).hostname;
+          } catch {
+            // leave urlHost as 'unknown'
+          }
+          try {
+            const res = await fetch(att.url);
+            if (res.ok) {
+              entry.data = Buffer.from(await res.arrayBuffer()).toString('base64');
+            } else {
+              // Log host + status only — the url can carry query auth.
+              log.warn('Failed to download attachment via url', {
+                type: att.type,
+                host: urlHost,
+                status: res.status,
+              });
+            }
+          } catch (err) {
+            log.warn('Failed to download attachment via url', {
+              type: att.type,
+              host: urlHost,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
         enriched.push(entry);
       }
       serialized.attachments = enriched;
