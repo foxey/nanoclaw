@@ -536,7 +536,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
               });
             }
           } catch (err) {
-            log.warn('Failed to download attachment via url', { type: att.type, host: urlHost, err });
+            log.warn('Failed to download attachment via url', {
+              type: att.type,
+              host: urlHost,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
         enriched.push(entry);
