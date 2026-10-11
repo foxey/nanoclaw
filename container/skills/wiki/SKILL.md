@@ -23,7 +23,7 @@ Triggered when the user drops a source (URL, file, PDF, image, voice note, paste
 
 1. Read `wiki/index.md` and `wiki/log.md` to orient
 2. Read/fetch the source fully:
-   - URL (webpage): use `agent-browser` or fetch full text with bash: `curl -sL "<url>" | python3 -m html.parser` or save locally first: `curl -sLo sources/<name>.md "<url>"`
+   - URL (webpage): use `agent-browser` or fetch full text with bash: `curl -sL "<url>" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(s.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim()))'` or save locally first: `curl -sLo sources/<name>.md "<url>"`
    - PDF: save to `sources/` then extract: `pdftotext sources/<name>.pdf -`
    - Image: read directly (multimodal)
    - Pasted text: treat as-is
