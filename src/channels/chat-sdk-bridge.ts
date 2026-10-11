@@ -1110,7 +1110,7 @@ function startLocalWebhookServer(
   });
 }
 
-async function handleForwardedEvent(
+export async function handleForwardedEvent(
   body: string,
   adapter: GatewayAdapter,
   setupConfig: ChannelSetup,
@@ -1140,10 +1140,17 @@ async function handleForwardedEvent(
       let questionId: string | undefined;
       let tail: string | undefined;
       if (customId?.startsWith('ncq:')) {
-        const colonIdx = customId.indexOf(':', 4); // after "ncq:"
+        // The Discord adapter encodes the button custom_id as
+        // `ncq:<id>:<idx>` + DELIMITER `\n` + `<value>`. Strip everything
+        // from the first newline so the triplet parse keeps the clean index;
+        // otherwise tail becomes e.g. '0\n0' and resolveSelectedOption fails
+        // its /^\d+$/ check, returning the raw value and failing closed to
+        // reject on every click.
+        const actionId = customId.split('\n', 1)[0];
+        const colonIdx = actionId.indexOf(':', 4); // after "ncq:"
         if (colonIdx !== -1) {
-          questionId = customId.slice(4, colonIdx);
-          tail = customId.slice(colonIdx + 1);
+          questionId = actionId.slice(4, colonIdx);
+          tail = actionId.slice(colonIdx + 1);
         }
       }
 
