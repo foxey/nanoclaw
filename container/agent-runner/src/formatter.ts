@@ -235,15 +235,21 @@ function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const sender = content.sender || content.author?.fullName || content.author?.userName || 'Unknown';
   const time = formatLocalTime(msg.timestamp, TIMEZONE);
-  const text = content.text || '';
   const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
+  const fromAttr = originAttr(msg);
+
+  // Inbound emoji reactions (chat-sdk-bridge onReaction) carry no body text —
+  // render the reacted emoji so the agent sees the signal.
+  if (content.reaction) {
+    return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}">[reacted ${escapeXml(content.reaction.emoji || '')}]</message>`;
+  }
+
+  const text = content.text || '';
   const replyAttr = content.replyTo?.id ? ` reply_to="${escapeXml(String(content.replyTo.id))}"` : '';
   const replyPrefix = formatReplyContext(content.replyTo);
   const linksSuffix = formatLinks(content.links, text);
   const attachmentsSuffix = formatAttachments(content.attachments);
   const appContextSuffix = formatAppContext(content.app_context);
-
-  const fromAttr = originAttr(msg);
 
   return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${linksSuffix}${attachmentsSuffix}${appContextSuffix}</message>`;
 }

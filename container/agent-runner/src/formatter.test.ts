@@ -236,6 +236,39 @@ describe('reply_to + quoted_message rendering', () => {
   });
 });
 
+describe('reaction rendering', () => {
+  it('renders a reaction message as [reacted EMOJI] inside a <message> tag', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Alice',
+      text: '',
+      reaction: { emoji: '👍', messageId: 'MSG1', added: true },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toMatch(/<message [^>]*>\[reacted 👍\]<\/message>/);
+  });
+
+  it('renders a reaction message with empty text (no body leak)', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Alice',
+      text: '',
+      reaction: { emoji: '❤️', messageId: 'MSG2', added: true },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('[reacted ❤️]</message>');
+    expect(result).not.toContain('[reacted ❤️] ');
+  });
+
+  it('renders the seq-based id attribute on a reaction message', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Alice',
+      text: '',
+      reaction: { emoji: '🚀', messageId: 'MSG3', added: true },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toMatch(/<message id="\d+"[^>]*>\[reacted 🚀\]<\/message>/);
+  });
+});
+
 describe('XML escaping', () => {
   it('escapes <, >, &, " in sender and body', () => {
     insertMessage('m1', 'chat', {
