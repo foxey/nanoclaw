@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { getAgentMailbox } from '../mailbox/index.js';
+import { getConfig } from '../config.js';
 import type { OutboundMessage } from '../mailbox/types.js';
 
 export interface MessageOutRow {
@@ -106,7 +107,17 @@ export function writeMessageOut(msg: WriteMessageOut): Promise<number> {
 }
 
 export function getMessageIdBySeq(seq: number): string | null {
-  return getAgentMailbox().operations.getMessageIdBySeq(seq);
+  const raw = getAgentMailbox().operations.getMessageIdBySeq(seq);
+  if (!raw) return null;
+  // Strip :agentGroupId namespace suffix added by the router's messageIdForAgent.
+  // MCP tools (add_reaction, edit_message) need the raw platform message ID.
+  try {
+    const agentGroupId = getConfig().agentGroupId;
+    if (agentGroupId && raw.endsWith(':' + agentGroupId)) {
+      return raw.slice(0, -(agentGroupId.length + 1));
+    }
+  } catch { /* config not loaded — return raw */ }
+  return raw;
 }
 
 export function getRoutingBySeq(

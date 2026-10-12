@@ -22,12 +22,13 @@ const DISCORD_DEFAULTS: ChannelDefaults = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
+export function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
   if (!raw.referenced_message) return null;
   const reply = raw.referenced_message;
   return {
     text: reply.content || '',
     sender: reply.author?.global_name || reply.author?.username || 'Unknown',
+    id: reply.id || undefined,
   };
 }
 

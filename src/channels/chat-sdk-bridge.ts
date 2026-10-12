@@ -47,6 +47,7 @@ interface ConnectionAwareAdapter extends Adapter {
 export interface ReplyContext {
   text: string;
   sender: string;
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
