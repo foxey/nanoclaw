@@ -237,17 +237,17 @@ describe('reply_to + quoted_message rendering', () => {
 });
 
 describe('reaction rendering', () => {
-  it('renders a reaction message as [reacted EMOJI] inside a <message> tag', () => {
+  it('renders a reaction-add with [reacted EMOJI] and reaction_to attribute', () => {
     insertMessage('r1', 'chat-sdk', {
       sender: 'Alice',
       text: '',
       reaction: { emoji: '👍', messageId: 'MSG1', added: true },
     });
     const result = formatMessages(getPendingMessages());
-    expect(result).toMatch(/<message [^>]*>\[reacted 👍\]<\/message>/);
+    expect(result).toMatch(/<message [^>]*reaction_to="MSG1"[^>]*>\[reacted 👍\]<\/message>/);
   });
 
-  it('renders a reaction message with empty text (no body leak)', () => {
+  it('renders a reaction-add with empty text (no body leak)', () => {
     insertMessage('r1', 'chat-sdk', {
       sender: 'Alice',
       text: '',
@@ -266,6 +266,38 @@ describe('reaction rendering', () => {
     });
     const result = formatMessages(getPendingMessages());
     expect(result).toMatch(/<message id="\d+"[^>]*>\[reacted 🚀\]<\/message>/);
+  });
+
+  it('renders a reaction-removal as [removed reaction EMOJI]', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Bob',
+      text: '',
+      reaction: { emoji: '👎', messageId: 'MSG4', added: false },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toMatch(/<message [^>]*reaction_to="MSG4"[^>]*>\[removed reaction 👎\]<\/message>/);
+  });
+
+  it('omits reaction_to attribute when messageId is absent', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Carol',
+      text: '',
+      reaction: { emoji: '🔥' },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toMatch(/<message [^>]*>\[reacted 🔥\]<\/message>/);
+    expect(result).not.toContain('reaction_to');
+  });
+
+  it('treats undefined added as an add (backward compat)', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Dave',
+      text: '',
+      reaction: { emoji: '✨', messageId: 'MSG5' },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('[reacted ✨]');
+    expect(result).not.toContain('[removed reaction');
   });
 });
 

@@ -239,9 +239,21 @@ function formatSingleChat(msg: MessageInRow): string {
   const fromAttr = originAttr(msg);
 
   // Inbound emoji reactions (chat-sdk-bridge onReaction) carry no body text —
-  // render the reacted emoji so the agent sees the signal.
+  // render the reacted emoji so the agent sees the signal. `reaction_to` is
+  // the raw PLATFORM message id of the message that was reacted to (NOT an
+  // internal seq id), so the agent can correlate which message it applies to.
+  // Adds render as `[reacted <emoji>]`; removals as `[removed reaction <emoji>]`.
+  // `added` defaults to true (backward compat with rows written before removal
+  // forwarding was added).
   if (content.reaction) {
-    return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}">[reacted ${escapeXml(content.reaction.emoji || '')}]</message>`;
+    const reactionToAttr = content.reaction.messageId
+      ? ` reaction_to="${escapeXml(String(content.reaction.messageId))}"`
+      : '';
+    const isAdd = content.reaction.added !== false;
+    const label = isAdd
+      ? `[reacted ${escapeXml(content.reaction.emoji || '')}]`
+      : `[removed reaction ${escapeXml(content.reaction.emoji || '')}]`;
+    return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${reactionToAttr}>${label}</message>`;
   }
 
   const text = content.text || '';

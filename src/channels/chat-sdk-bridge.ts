@@ -714,19 +714,22 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         });
       });
 
-      // Inbound emoji reactions. The SDK dispatches add and remove alike; we
-      // forward only adds through the standard inbound pipeline. The reaction
-      // rides as a chat-sdk message with empty text and a `reaction` content
-      // block (emoji + target messageId) the container formatter renders as
-      // `[reacted <emoji>]`. event.rawEmoji is the actual platform/unicode
-      // string (e.g. '👍') — event.emoji is a normalized EmojiValue object,
-      // not what the formatter should display.
+      // Inbound emoji reactions. The SDK dispatches both adds and removes; we
+      // forward both so the agent can track reaction state. The reaction rides
+      // as a chat-sdk message with empty text and a `reaction` content block
+      // (emoji + target messageId + added flag). The container formatter
+      // renders adds as `[reacted <emoji>]` and removals as
+      // `[removed reaction <emoji>]`, each with a `reaction_to` attribute
+      // carrying the platform message id of the reacted-to message.
+      // event.rawEmoji is the actual platform/unicode string (e.g. '👍') —
+      // event.emoji is a normalized EmojiValue object, not what the formatter
+      // should display.
       chat.onReaction((event) => {
-        if (!event.added) return;
         const channelId = adapter.channelIdFromThreadId(event.thread.id);
         const senderName = event.user?.fullName ?? event.user?.userName ?? 'Unknown';
+        const kind = event.added ? 'add' : 'remove';
         const inbound: InboundMessage = {
-          id: `reaction-${event.messageId}-${event.user?.userId}-${Date.now()}`,
+          id: `reaction-${kind}-${event.messageId}-${event.user?.userId}-${Date.now()}`,
           kind: 'chat-sdk',
           timestamp: new Date().toISOString(),
           isMention: false,

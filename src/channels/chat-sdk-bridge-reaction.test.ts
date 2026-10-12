@@ -1,6 +1,8 @@
 /**
  * Bridge reaction dispatch: chat.onReaction events registered in setup()
- * flow through the inbound pipeline. Adds are forwarded; removes are filtered.
+ * flow through the inbound pipeline. Both adds and removes are forwarded; the
+ * synthetic message id encodes which so add/remove on the same target don't
+ * collide.
  *
  * Same test strategy as chat-sdk-bridge-membership.test.ts — real Chat
  * instance via the mocked registerWebhookAdapter, processReaction through
@@ -120,13 +122,13 @@ describe('chat.onReaction dispatch', () => {
     await bridge.teardown();
   });
 
-  it('reaction-remove (added:false) does NOT dispatch onInbound', async () => {
-    const captured: unknown[] = [];
+  it('reaction-remove (added:false) dispatches onInbound with added:false content', async () => {
+    const captured: { channelId: string; threadId: string | null; message: InboundMessage }[] = [];
     const adapter = stubAdapter('test-platform');
     const bridge = createChatSdkBridge({ adapter, supportsThreads: true });
     await bridge.setup({
-      onInbound: (_channelId, _threadId, message) => {
-        captured.push(message);
+      onInbound: (channelId, threadId, message) => {
+        captured.push({ channelId, threadId, message });
       },
       onInboundEvent: () => {},
       onMetadata: () => {},
@@ -151,7 +153,13 @@ describe('chat.onReaction dispatch', () => {
       ),
     );
 
-    expect(captured).toHaveLength(0);
+    expect(captured).toHaveLength(1);
+    const content = captured[0].message.content as Record<string, unknown>;
+    expect(content.reaction).toEqual({
+      emoji: '👍',
+      messageId: 'MSG456',
+      added: false,
+    });
 
     await bridge.teardown();
   });
@@ -194,13 +202,13 @@ describe('chat.onReaction dispatch', () => {
     await bridge.teardown();
   });
 
-  it('synthesized message id matches the reaction-{messageId}-{userId}-{timestamp} pattern', async () => {
-    let receivedMessage: InboundMessage | undefined;
+  it('synthesized id encodes add/remove so the same target does not collide', async () => {
+    const ids: string[] = [];
     const adapter = stubAdapter('test-platform');
     const bridge = createChatSdkBridge({ adapter, supportsThreads: true });
     await bridge.setup({
       onInbound: (_channelId, _threadId, message) => {
-        receivedMessage = message;
+        ids.push(message.id);
       },
       onInboundEvent: () => {},
       onMetadata: () => {},
@@ -209,24 +217,29 @@ describe('chat.onReaction dispatch', () => {
 
     const chat = (bridge as unknown as { _chat: Chat })._chat;
 
-    await dispatch((options) =>
-      chat.processReaction(
-        {
-          added: true,
-          emoji: mockEmojiValue('rocket'),
-          rawEmoji: '🚀',
-          messageId: 'MSG_ABC',
-          threadId: 'test-platform:CH3:T3',
-          user: defaultUser,
-          adapter,
-          raw: {},
-        },
-        options,
-      ),
-    );
+    const fire = (added: boolean) =>
+      dispatch((options) =>
+        chat.processReaction(
+          {
+            added,
+            emoji: mockEmojiValue('rocket'),
+            rawEmoji: '🚀',
+            messageId: 'MSG_ABC',
+            threadId: 'test-platform:CH3:T3',
+            user: defaultUser,
+            adapter,
+            raw: {},
+          },
+          options,
+        ),
+      );
 
-    expect(receivedMessage).toBeDefined();
-    expect(receivedMessage!.id).toMatch(/^reaction-MSG_ABC-U0REACTOR-\d+$/);
+    await fire(true);
+    await fire(false);
+
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/^reaction-add-MSG_ABC-U0REACTOR-\d+$/);
+    expect(ids[1]).toMatch(/^reaction-remove-MSG_ABC-U0REACTOR-\d+$/);
 
     await bridge.teardown();
   });
