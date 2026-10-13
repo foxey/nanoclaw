@@ -1,4 +1,5 @@
 import { findByRouting } from './destinations.js';
+import { getSeqByPlatformMessageId } from './db/messages-in.js';
 import type { MessageInRow } from './db/messages-in.js';
 import { TIMEZONE, formatLocalTime, formatLocalStamp } from './timezone.js';
 import './providers/index.js';
@@ -235,15 +236,45 @@ function formatSingleChat(msg: MessageInRow): string {
   const content = parseContent(msg.content);
   const sender = content.sender || content.author?.fullName || content.author?.userName || 'Unknown';
   const time = formatLocalTime(msg.timestamp, TIMEZONE);
-  const text = content.text || '';
   const idAttr = msg.seq != null ? ` id="${msg.seq}"` : '';
+  const fromAttr = originAttr(msg);
+
+  // Inbound emoji reactions (chat-sdk-bridge onReaction) carry no body text —
+  // render the reacted emoji so the agent sees the signal. The reacted-to
+  // message is identified by:
+  //   - `reaction_to="#<seq>"` — the PRIMARY reference, the internal seq (#N)
+  //     the agent correlates by. Emitted only when the target snowflake
+  //     resolves to a stored inbound row.
+  //   - `reaction_to_platform="<snowflake>"` — the raw platform message id,
+  //     always emitted when present (kept so nothing is lost when the target
+  //     was never stored — older than history, or the agent's own just-sent
+  //     message that isn't correlatable yet).
+  // When the target isn't in this session's store we emit ONLY
+  // `reaction_to_platform` — never a bare uncorrelatable snowflake as
+  // `reaction_to`. Adds render as `[reacted <emoji>]`; removals as
+  // `[removed reaction <emoji>]`. `added` defaults to true (backward compat
+  // with rows written before removal forwarding was added).
+  if (content.reaction) {
+    const snowflake = content.reaction.messageId ? String(content.reaction.messageId) : '';
+    let reactionToAttr = '';
+    if (snowflake) {
+      const seq = getSeqByPlatformMessageId(snowflake);
+      if (seq != null) reactionToAttr += ` reaction_to="#${seq}"`;
+      reactionToAttr += ` reaction_to_platform="${escapeXml(snowflake)}"`;
+    }
+    const isAdd = content.reaction.added !== false;
+    const label = isAdd
+      ? `[reacted ${escapeXml(content.reaction.emoji || '')}]`
+      : `[removed reaction ${escapeXml(content.reaction.emoji || '')}]`;
+    return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${reactionToAttr}>${label}</message>`;
+  }
+
+  const text = content.text || '';
   const replyAttr = content.replyTo?.id ? ` reply_to="${escapeXml(String(content.replyTo.id))}"` : '';
   const replyPrefix = formatReplyContext(content.replyTo);
   const linksSuffix = formatLinks(content.links, text);
   const attachmentsSuffix = formatAttachments(content.attachments);
   const appContextSuffix = formatAppContext(content.app_context);
-
-  const fromAttr = originAttr(msg);
 
   return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${linksSuffix}${attachmentsSuffix}${appContextSuffix}</message>`;
 }

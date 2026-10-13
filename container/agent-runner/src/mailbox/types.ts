@@ -47,6 +47,8 @@ export interface MailboxOperations {
   markMessages(ids: string[], status: ProcessingStatus): void;
   markScriptSkipped(skips: Array<{ id: string; reason: string }>): void;
   getMessageIn(id: string): InboundMessage | undefined;
+  /** Reverse-resolve a platform message snowflake to the internal seq (#N). */
+  getSeqByPlatformMessageId(snowflake: string): number | null;
   findQuestionResponse(questionId: string): InboundMessage | undefined;
   findCliResponse(requestId: string): InboundMessage | undefined;
   writeMessageOut(message: OutboundMessageDraft): Promise<number>;

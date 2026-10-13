@@ -102,6 +102,16 @@ export function getMessageIn(id: string): MessageInRow | undefined {
   return message && messageRow(message);
 }
 
+/**
+ * Reverse-resolve a platform message snowflake to the internal seq (#N) of the
+ * stored inbound row whose id is `"<snowflake>:<agentGroupId>"`. Returns null
+ * when the reacted-to message isn't in this session's store. Used by the
+ * formatter to render `reaction_to="#<seq>"` instead of a bare snowflake.
+ */
+export function getSeqByPlatformMessageId(snowflake: string): number | null {
+  return getAgentMailbox().operations.getSeqByPlatformMessageId(snowflake);
+}
+
 export function findQuestionResponse(questionId: string): MessageInRow | undefined {
   const message = getAgentMailbox().operations.findQuestionResponse(questionId);
   return message && messageRow(message);

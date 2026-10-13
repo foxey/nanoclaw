@@ -14,6 +14,7 @@ import {
   sqliteGetAllDestinations,
   sqliteGetMessageIn,
   sqliteGetMessageIdBySeq,
+  sqliteGetSeqByPlatformMessageId,
   sqliteGetPendingMessages,
   sqliteGetRoutingBySeq,
   sqliteGetSessionRouting,
@@ -133,6 +134,10 @@ export class SqliteAgentMailbox implements AgentMailbox {
   getMessageIn(id: string): InboundMessage | undefined {
     const row = sqliteGetMessageIn(id);
     return row && inboundMessage(row);
+  }
+
+  getSeqByPlatformMessageId(snowflake: string): number | null {
+    return sqliteGetSeqByPlatformMessageId(snowflake);
   }
 
   findQuestionResponse(questionId: string): InboundMessage | undefined {

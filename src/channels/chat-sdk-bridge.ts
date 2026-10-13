@@ -47,6 +47,7 @@ interface ConnectionAwareAdapter extends Adapter {
 export interface ReplyContext {
   text: string;
   sender: string;
+  id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -711,6 +712,64 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           userId: event.userId,
           inviterId: event.inviterId,
         });
+      });
+
+      // Inbound emoji reactions. The SDK dispatches both adds and removes; we
+      // forward both so the agent can track reaction state. The reaction rides
+      // as a chat-sdk message with empty text and a `reaction` content block
+      // (emoji + target messageId + added flag). The container formatter
+      // renders adds as `[reacted <emoji>]` and removals as
+      // `[removed reaction <emoji>]`, each with a `reaction_to` attribute
+      // carrying the platform message id of the reacted-to message.
+      // event.rawEmoji is the actual platform/unicode string (e.g. '👍') —
+      // event.emoji is a normalized EmojiValue object, not what the formatter
+      // should display.
+      chat.onReaction(async (event) => {
+        const channelId = adapter.channelIdFromThreadId(event.thread.id);
+        // Issue A: the vendored adapter's reaction path sets event.user.fullName
+        // to the Discord *username*, so `fullName ?? userName` can never recover
+        // the display name regular messages show. Resolve the sender through the
+        // adapter's getUser (Discord's returns global_name || username — parity
+        // with regular messages). We call the adapter directly rather than
+        // chat.getUser so the lookup doesn't depend on the SDK's userId-format
+        // inference. Fall back to the event fields if getUser is unsupported,
+        // returns null, or throws.
+        let resolvedName: string | undefined;
+        const reactionUserId = event.user?.userId;
+        const adapterGetUser = (adapter as { getUser?: (userId: string) => Promise<{ fullName?: string } | null> })
+          .getUser;
+        if (reactionUserId && adapterGetUser) {
+          try {
+            const resolved = await adapterGetUser.call(adapter, reactionUserId);
+            if (resolved?.fullName) resolvedName = resolved.fullName;
+          } catch (err) {
+            log.warn('Reaction sender getUser lookup failed', {
+              userId: reactionUserId,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        const senderName = resolvedName ?? event.user?.fullName ?? event.user?.userName ?? 'Unknown';
+        const kind = event.added ? 'add' : 'remove';
+        const inbound: InboundMessage = {
+          id: `reaction-${kind}-${event.messageId}-${event.user?.userId}-${Date.now()}`,
+          kind: 'chat-sdk',
+          timestamp: new Date().toISOString(),
+          isMention: false,
+          isGroup: true,
+          content: {
+            text: '',
+            reaction: {
+              emoji: event.rawEmoji,
+              messageId: event.messageId,
+              added: event.added,
+            },
+            senderId: event.user?.userId,
+            sender: senderName,
+            senderName,
+          },
+        };
+        void setupConfig.onInbound(channelId, event.thread.id, inbound);
       });
 
       // Handle button clicks (ask_user_question)

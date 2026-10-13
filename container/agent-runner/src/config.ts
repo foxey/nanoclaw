@@ -77,3 +77,11 @@ export function getConfig(): RunnerConfig {
   if (!_config) throw new Error('Config not loaded — call loadConfig() first');
   return _config;
 }
+
+/**
+ * Test seam: install a config directly (bypassing the file read) or clear it
+ * with `null`. Only for tests that exercise code paths behind getConfig().
+ */
+export function setConfigForTesting(config: RunnerConfig | null): void {
+  _config = config;
+}
