@@ -208,6 +208,8 @@ describe('initGroupFilesystem agent surfaces', () => {
       },
     ];
     settings.hooks.SessionStart = [{ matcher: 'resume', hooks: [{ type: 'command', command: 'custom-resume' }] }];
+    const customPreCompact = [{ matcher: '.*', hooks: [{ type: 'command', command: 'custom-precompact' }] }];
+    settings.hooks.PreCompact = customPreCompact;
     fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
 
     await initGroupFilesystem(ag);
@@ -217,6 +219,8 @@ describe('initGroupFilesystem agent surfaces', () => {
     expect(reconciled.hooks.SessionStart).toEqual([
       { matcher: 'resume', hooks: [{ type: 'command', command: 'custom-resume' }] },
     ]);
+    // The seeded custom PreCompact entry survives, and the default command is appended alongside it.
+    expect(reconciled.hooks.PreCompact).toContainEqual(customPreCompact[0]);
     expect(JSON.stringify(reconciled.hooks.PreCompact)).toContain('compact-instructions.ts');
   });
 
