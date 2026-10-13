@@ -19,8 +19,6 @@ vi.mock('../webhook-server.js', () => ({
   registerWebhookAdapter: vi.fn(),
 }));
 
-import { registerWebhookAdapter } from '../webhook-server.js';
-
 function stubAdapter(name: string, partial: Partial<Adapter> = {}): Adapter {
   return {
     name,
@@ -39,12 +37,6 @@ async function dispatch(fire: (options: { waitUntil: (p: Promise<unknown>) => vo
     },
   });
   await task;
-}
-
-/** The Chat instance setup() registered on the (mocked) webhook server. */
-function lastRegisteredChat(): Chat {
-  const calls = vi.mocked(registerWebhookAdapter).mock.calls;
-  return calls[calls.length - 1][0] as Chat;
 }
 
 beforeEach(async () => {
@@ -160,6 +152,92 @@ describe('chat.onReaction dispatch', () => {
       messageId: 'MSG456',
       added: false,
     });
+
+    await bridge.teardown();
+  });
+
+  it('resolves the reaction sender display name via getUser (Issue A)', async () => {
+    const captured: InboundMessage[] = [];
+    // The vendored Discord adapter sets event.user.fullName to the USERNAME on
+    // reactions. getUser returns the display name (global_name || username).
+    const adapter = stubAdapter('test-platform', {
+      getUser: async (userId: string) =>
+        userId === 'U0REACTOR' ? { userId, userName: 'foxey8145', fullName: 'foxey', isBot: false } : null,
+    } as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true });
+    await bridge.setup({
+      onInbound: (_channelId, _threadId, message) => {
+        captured.push(message);
+      },
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    });
+
+    const chat = (bridge as unknown as { _chat: Chat })._chat;
+
+    await dispatch((options) =>
+      chat.processReaction(
+        {
+          added: true,
+          emoji: mockEmojiValue('thumbs_up'),
+          rawEmoji: '👍',
+          messageId: 'MSG123',
+          threadId: 'test-platform:CH1:T1',
+          // fullName here is the USERNAME, mirroring the adapter reaction path.
+          user: { userId: 'U0REACTOR', userName: 'foxey8145', fullName: 'foxey8145', isBot: false, isMe: false },
+          adapter,
+          raw: {},
+        },
+        options,
+      ),
+    );
+
+    expect(captured).toHaveLength(1);
+    const content = captured[0].content as Record<string, unknown>;
+    expect(content.sender).toBe('foxey');
+    expect(content.senderName).toBe('foxey');
+
+    await bridge.teardown();
+  });
+
+  it('falls back to event.user fields when getUser returns null (Issue A fallback)', async () => {
+    const captured: InboundMessage[] = [];
+    const adapter = stubAdapter('test-platform', {
+      getUser: async () => null,
+    } as Partial<Adapter>);
+    const bridge = createChatSdkBridge({ adapter, supportsThreads: true });
+    await bridge.setup({
+      onInbound: (_channelId, _threadId, message) => {
+        captured.push(message);
+      },
+      onInboundEvent: () => {},
+      onMetadata: () => {},
+      onAction: () => {},
+    });
+
+    const chat = (bridge as unknown as { _chat: Chat })._chat;
+
+    await dispatch((options) =>
+      chat.processReaction(
+        {
+          added: true,
+          emoji: mockEmojiValue('thumbs_up'),
+          rawEmoji: '👍',
+          messageId: 'MSG123',
+          threadId: 'test-platform:CH1:T1',
+          user: { userId: 'U0REACTOR', userName: 'reactor', fullName: 'Reacting User', isBot: false, isMe: false },
+          adapter,
+          raw: {},
+        },
+        options,
+      ),
+    );
+
+    expect(captured).toHaveLength(1);
+    const content = captured[0].content as Record<string, unknown>;
+    expect(content.sender).toBe('Reacting User');
+    expect(content.senderName).toBe('Reacting User');
 
     await bridge.teardown();
   });

@@ -724,9 +724,32 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // event.rawEmoji is the actual platform/unicode string (e.g. '👍') —
       // event.emoji is a normalized EmojiValue object, not what the formatter
       // should display.
-      chat.onReaction((event) => {
+      chat.onReaction(async (event) => {
         const channelId = adapter.channelIdFromThreadId(event.thread.id);
-        const senderName = event.user?.fullName ?? event.user?.userName ?? 'Unknown';
+        // Issue A: the vendored adapter's reaction path sets event.user.fullName
+        // to the Discord *username*, so `fullName ?? userName` can never recover
+        // the display name regular messages show. Resolve the sender through the
+        // adapter's getUser (Discord's returns global_name || username — parity
+        // with regular messages). We call the adapter directly rather than
+        // chat.getUser so the lookup doesn't depend on the SDK's userId-format
+        // inference. Fall back to the event fields if getUser is unsupported,
+        // returns null, or throws.
+        let resolvedName: string | undefined;
+        const reactionUserId = event.user?.userId;
+        const adapterGetUser = (adapter as { getUser?: (userId: string) => Promise<{ fullName?: string } | null> })
+          .getUser;
+        if (reactionUserId && adapterGetUser) {
+          try {
+            const resolved = await adapterGetUser.call(adapter, reactionUserId);
+            if (resolved?.fullName) resolvedName = resolved.fullName;
+          } catch (err) {
+            log.warn('Reaction sender getUser lookup failed', {
+              userId: reactionUserId,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        const senderName = resolvedName ?? event.user?.fullName ?? event.user?.userName ?? 'Unknown';
         const kind = event.added ? 'add' : 'remove';
         const inbound: InboundMessage = {
           id: `reaction-${kind}-${event.messageId}-${event.user?.userId}-${Date.now()}`,

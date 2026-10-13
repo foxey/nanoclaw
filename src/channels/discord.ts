@@ -73,6 +73,50 @@ function unwrapForwards(adapter: ReturnType<typeof createDiscordAdapter>): void 
   };
 }
 
+/**
+ * Issue C: reaction REMOVALS never reached the agent on the live Gateway path.
+ * The raw `MESSAGE_REACTION_ADD` payload carries a `member.user` object, but the
+ * raw `MESSAGE_REACTION_REMOVE` payload carries only `user_id` (no `user`, no
+ * `member`). The vendored adapter's `handleForwardedReaction` reads
+ * `data.user ?? data.member?.user` and, finding neither on a remove, logs
+ * "Reaction event missing user info" and returns early — silently dropping the
+ * event. (The bridge unit test passes because it calls `chat.processReaction`
+ * directly, bypassing the adapter.)
+ *
+ * Fix, entirely in our committed source: wrap `handleForwardedReaction` so that
+ * when a remove arrives without a user object we synthesize `data.user` from
+ * `data.user_id` before delegating. The username is resolved via the adapter's
+ * own `getUser` (same mechanism as Issue A); if that fails we still synthesize a
+ * minimal `user` with the id so the event is forwarded (sender resolution then
+ * falls back in the bridge). Defensive: no error escapes the wrapper.
+ */
+export function enrichReactionRemoves(adapter: ReturnType<typeof createDiscordAdapter>): void {
+  const a = adapter as unknown as {
+    handleForwardedReaction: (data: Record<string, unknown>, added: boolean, options?: unknown) => Promise<void>;
+    getUser?: (userId: string) => Promise<{ userId?: string; userName?: string; fullName?: string } | null>;
+  };
+  const orig = a.handleForwardedReaction.bind(adapter);
+  a.handleForwardedReaction = async (data, added, options) => {
+    if (!data.user && !(data.member as { user?: unknown } | undefined)?.user) {
+      const userId = data.user_id;
+      if (typeof userId === 'string' && userId.length > 0) {
+        let userName: string | undefined;
+        try {
+          const resolved = await a.getUser?.(userId);
+          userName = resolved?.userName ?? resolved?.fullName;
+        } catch {
+          // Lookup failed — synthesize with id only; sender resolution falls
+          // back in the bridge. Never let this throw out of the handler.
+        }
+        // The adapter reads userInfo.id / userInfo.username; synthesize both so
+        // the early-return guard passes and the event forwards.
+        data.user = { id: userId, username: userName ?? userId };
+      }
+    }
+    return orig(data, added, options);
+  };
+}
+
 registerChannelAdapter('discord', {
   factory: () => {
     const env = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_PUBLIC_KEY', 'DISCORD_APPLICATION_ID']);
@@ -83,6 +127,7 @@ registerChannelAdapter('discord', {
       applicationId: env.DISCORD_APPLICATION_ID,
     });
     unwrapForwards(discordAdapter);
+    enrichReactionRemoves(discordAdapter);
     return createChatSdkBridge({
       adapter: discordAdapter,
       concurrency: 'concurrent',

@@ -91,6 +91,30 @@ export function sqliteMarkScriptSkipped(skips: Array<{ id: string; reason: strin
   })();
 }
 
+/**
+ * Reverse-resolve a platform message snowflake to the internal `seq` of the
+ * stored inbound row whose id is `"<snowflake>:<agentGroupId>"` (see host
+ * router.ts messageIdForAgent). Returns null when the target isn't stored
+ * (older than retained history, or the agent's own just-sent message).
+ *
+ * Snowflakes are opaque digit strings so normally carry no LIKE
+ * metacharacters, but we escape `%`, `_` and the escape char defensively (via
+ * an explicit ESCAPE clause) so a malformed value can never inject a wildcard.
+ */
+export function sqliteGetSeqByPlatformMessageId(snowflake: string): number | null {
+  if (snowflake.length === 0) return null;
+  const escaped = snowflake.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+  const inbound = openInboundDb();
+  try {
+    const row = inbound
+      .prepare("SELECT seq FROM messages_in WHERE id LIKE ? ESCAPE '\\' ORDER BY seq ASC LIMIT 1")
+      .get(`${escaped}:%`) as { seq: number | null } | undefined;
+    return row?.seq ?? null;
+  } finally {
+    inbound.close();
+  }
+}
+
 export function sqliteGetMessageIn(id: string): MessageInRow | undefined {
   const inbound = openInboundDb();
   try {

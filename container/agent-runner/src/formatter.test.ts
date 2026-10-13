@@ -237,14 +237,43 @@ describe('reply_to + quoted_message rendering', () => {
 });
 
 describe('reaction rendering', () => {
-  it('renders a reaction-add with [reacted EMOJI] and reaction_to attribute', () => {
+  // Seed a stored inbound row whose id is "<snowflake>:<group>" (the shape the
+  // host writer uses — router.ts messageIdForAgent) so the formatter's
+  // snowflake→seq reverse lookup finds it. Returns the row's seq.
+  function seedTarget(snowflake: string, group = 'g1'): number {
+    const seq = nextSeq++;
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, content, seq)
+         VALUES (?, 'chat', ?, 'completed', ?, ?)`,
+      )
+      .run(`${snowflake}:${group}`, new Date().toISOString(), JSON.stringify({ sender: 'Alice', text: 'target' }), seq);
+    return seq;
+  }
+
+  it('renders reaction_to="#<seq>" (primary) and reaction_to_platform when the target is stored', () => {
+    const seq = seedTarget('MSG1');
     insertMessage('r1', 'chat-sdk', {
       sender: 'Alice',
       text: '',
       reaction: { emoji: '👍', messageId: 'MSG1', added: true },
     });
     const result = formatMessages(getPendingMessages());
-    expect(result).toMatch(/<message [^>]*reaction_to="MSG1"[^>]*>\[reacted 👍\]<\/message>/);
+    expect(result).toMatch(
+      new RegExp(`<message [^>]*reaction_to="#${seq}" reaction_to_platform="MSG1"[^>]*>\\[reacted 👍\\]</message>`),
+    );
+  });
+
+  it('emits only reaction_to_platform (no #N) when the target is not stored', () => {
+    insertMessage('r1', 'chat-sdk', {
+      sender: 'Alice',
+      text: '',
+      reaction: { emoji: '👍', messageId: 'MSG_UNSTORED', added: true },
+    });
+    const result = formatMessages(getPendingMessages());
+    expect(result).toMatch(/<message [^>]*reaction_to_platform="MSG_UNSTORED"[^>]*>\[reacted 👍\]<\/message>/);
+    expect(result).not.toContain('reaction_to="#');
+    expect(result).not.toMatch(/reaction_to="MSG_UNSTORED"/);
   });
 
   it('renders a reaction-add with empty text (no body leak)', () => {
@@ -268,17 +297,22 @@ describe('reaction rendering', () => {
     expect(result).toMatch(/<message id="\d+"[^>]*>\[reacted 🚀\]<\/message>/);
   });
 
-  it('renders a reaction-removal as [removed reaction EMOJI]', () => {
+  it('renders a reaction-removal as [removed reaction EMOJI] with the seq reference', () => {
+    const seq = seedTarget('MSG4');
     insertMessage('r1', 'chat-sdk', {
       sender: 'Bob',
       text: '',
       reaction: { emoji: '👎', messageId: 'MSG4', added: false },
     });
     const result = formatMessages(getPendingMessages());
-    expect(result).toMatch(/<message [^>]*reaction_to="MSG4"[^>]*>\[removed reaction 👎\]<\/message>/);
+    expect(result).toMatch(
+      new RegExp(
+        `<message [^>]*reaction_to="#${seq}" reaction_to_platform="MSG4"[^>]*>\\[removed reaction 👎\\]</message>`,
+      ),
+    );
   });
 
-  it('omits reaction_to attribute when messageId is absent', () => {
+  it('omits all reaction_to attributes when messageId is absent', () => {
     insertMessage('r1', 'chat-sdk', {
       sender: 'Carol',
       text: '',
