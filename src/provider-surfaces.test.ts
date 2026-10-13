@@ -194,6 +194,36 @@ describe('initGroupFilesystem agent surfaces', () => {
     expect(JSON.stringify(reconciled.hooks.PreCompact)).toContain('compact-instructions.ts');
   });
 
+  it('strips the legacy Stop/agent group-memory hook while preserving unrelated hooks', async () => {
+    const ag = group('ag-stop-memory-hook', 'stop-memory-hook-group');
+    await createAgentGroup(ag);
+    await initGroupFilesystem(ag);
+
+    const settingsFile = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    settings.hooks.Stop = [
+      {
+        matcher: '.*',
+        hooks: [{ type: 'agent', prompt: 'Write a summary of this session to /workspace/group/memory.md' }],
+      },
+    ];
+    settings.hooks.SessionStart = [{ matcher: 'resume', hooks: [{ type: 'command', command: 'custom-resume' }] }];
+    const customPreCompact = [{ matcher: '.*', hooks: [{ type: 'command', command: 'custom-precompact' }] }];
+    settings.hooks.PreCompact = customPreCompact;
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+
+    await initGroupFilesystem(ag);
+
+    const reconciled = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    expect(reconciled.hooks.Stop).toBeUndefined();
+    expect(reconciled.hooks.SessionStart).toEqual([
+      { matcher: 'resume', hooks: [{ type: 'command', command: 'custom-resume' }] },
+    ]);
+    // The seeded custom PreCompact entry survives, and the default command is appended alongside it.
+    expect(reconciled.hooks.PreCompact).toContainEqual(customPreCompact[0]);
+    expect(JSON.stringify(reconciled.hooks.PreCompact)).toContain('compact-instructions.ts');
+  });
+
   it.each([
     ['malformed JSON', '{"hooks":'],
     ['a non-object root', '[]\n'],
