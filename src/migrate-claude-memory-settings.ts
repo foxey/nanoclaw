@@ -5,6 +5,7 @@ import type { ProviderFileDiagnostic, ProviderFileTransformer } from './provider
 
 const PRE_COMPACT_COMMAND = 'bun /app/src/compact-instructions.ts';
 const LEGACY_MEMORY_SESSION_START_COMMAND = 'bun /app/src/memory-hook.ts';
+const LEGACY_MEMORY_GROUP_PROMPT_PATH = '/workspace/group/memory.md';
 
 export const CLAUDE_DEFAULT_SETTINGS =
   JSON.stringify(
@@ -96,6 +97,14 @@ export const claudeSettingsTransformer: ProviderFileTransformer = {
       changed = true;
     }
 
+    const existingStop = Array.isArray(hooks.Stop) ? hooks.Stop : [];
+    const nextStop = existingStop.map(removeLegacyNanoClawMemoryHook).filter((entry) => entry !== undefined);
+    if (JSON.stringify(nextStop) !== JSON.stringify(existingStop)) {
+      if (nextStop.length > 0) hooks.Stop = nextStop;
+      else delete hooks.Stop;
+      changed = true;
+    }
+
     const preCompact = Array.isArray(hooks.PreCompact) ? hooks.PreCompact : [];
     if (!JSON.stringify(preCompact).includes(PRE_COMPACT_COMMAND)) {
       preCompact.push({ hooks: [{ type: 'command', command: PRE_COMPACT_COMMAND }] });
@@ -133,11 +142,18 @@ function emitDiagnostic(diagnostic: ProviderFileDiagnostic): void {
 
 function removeLegacyNanoClawMemoryHook(value: unknown): unknown {
   if (!isRecord(value) || !Array.isArray(value.hooks)) return value;
-  const remaining = value.hooks.filter((hook) => {
-    if (!isRecord(hook)) return true;
-    return hook.command !== LEGACY_MEMORY_SESSION_START_COMMAND;
-  });
+  const remaining = value.hooks.filter((hook) => !isLegacyNanoClawMemoryHook(hook));
   return remaining.length > 0 ? { ...value, hooks: remaining } : undefined;
+}
+
+function isLegacyNanoClawMemoryHook(hook: unknown): boolean {
+  if (!isRecord(hook)) return false;
+  // Legacy SessionStart command hook that ran the retired memory-hook.ts script.
+  if (hook.command === LEGACY_MEMORY_SESSION_START_COMMAND) return true;
+  // Pre-v2 Stop/agent prompt hook that wrote group memory to the old mount path.
+  return (
+    hook.type === 'agent' && typeof hook.prompt === 'string' && hook.prompt.includes(LEGACY_MEMORY_GROUP_PROMPT_PATH)
+  );
 }
 
 /** Write via a fresh temp file + rename so readers never see a partial file. */
