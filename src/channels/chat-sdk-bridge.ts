@@ -908,7 +908,16 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     async deliver(platformId: string, threadId: string | null, message): Promise<string | undefined> {
       // platformId is already in the adapter's encoded format (e.g. "telegram:6037840640",
-      // "discord:guildId:channelId") — use it directly as the thread ID
+      // "discord:guildId:channelId") — use it directly as the thread ID.
+      //
+      // When the row carries a thread id (a message received inside a thread),
+      // tid MUST remain that full thread address so the adapter targets the
+      // thread, not the parent channel. For Discord a thread message's address
+      // is the 4-part `discord:guild:channel:thread`; collapsing it to the
+      // 3-part channel id makes an in-thread reaction (and edit) hit the parent
+      // channel, where the target message does not live, and the API 404s. Edit
+      // and reaction share this derivation deliberately — both must land in the
+      // same thread the targeted message lives in.
       const tid = threadId ?? platformId;
       const content = message.content as Record<string, unknown>;
 

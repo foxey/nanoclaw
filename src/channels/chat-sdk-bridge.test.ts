@@ -392,6 +392,67 @@ describe('createChatSdkBridge.deliver — ask_question cards (button styles)', (
   });
 });
 
+describe('createChatSdkBridge.deliver — emoji reactions', () => {
+  // The user reports reactions work in the main channel but not inside a thread.
+  // The outbound row carries the message's thread_id (see mcp-tools/core.test.ts);
+  // the bridge must forward that thread id to adapter.addReaction so the Discord
+  // adapter targets the thread, not the parent channel. A 4-part thread tid
+  // targets the thread; a 3-part channel tid targets the parent channel.
+  interface ReactionCall {
+    threadId: string;
+    messageId: string;
+    emoji: string;
+  }
+
+  function makeReactionCapture() {
+    const calls: ReactionCall[] = [];
+    const addReaction = async (threadId: string, messageId: string, emoji: string): Promise<void> => {
+      calls.push({ threadId, messageId, emoji });
+    };
+    return { calls, addReaction };
+  }
+
+  it('targets the full thread id when the reaction row carries a thread', async () => {
+    const { calls, addReaction } = makeReactionCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ addReaction }),
+      supportsThreads: true,
+    });
+
+    await bridge.deliver('discord:guild:chan', 'discord:guild:chan:thread-5', {
+      kind: 'chat-sdk',
+      content: { operation: 'reaction', messageId: 'discord-msg-77', emoji: 'thumbs_up' },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      threadId: 'discord:guild:chan:thread-5',
+      messageId: 'discord-msg-77',
+      emoji: 'thumbs_up',
+    });
+  });
+
+  it('targets the channel platform_id when the reaction row has no thread (main-channel case still works)', async () => {
+    const { calls, addReaction } = makeReactionCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ addReaction }),
+      supportsThreads: true,
+    });
+
+    await bridge.deliver('discord:guild:chan', null, {
+      kind: 'chat-sdk',
+      content: { operation: 'reaction', messageId: 'discord-msg-88', emoji: 'heart' },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      threadId: 'discord:guild:chan',
+      messageId: 'discord-msg-88',
+      emoji: 'heart',
+    });
+  });
+});
+
 describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
   // The send_card MCP tool writes outbound rows with `{ type: 'card', card, fallbackText }`.
   // Before this branch existed the bridge silently dropped them: cards have no
