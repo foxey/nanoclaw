@@ -13,7 +13,7 @@ import fs from 'fs';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../mailbox/sqlite/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
-import { sendFile, sendMessage } from './core.js';
+import { addReaction, editMessage, sendFile, sendMessage } from './core.js';
 
 /**
  * Publish the reply stamp the way the poll loop does: a direct write to
@@ -203,5 +203,58 @@ describe('send_message / send_file — thread for a channel destination', () => 
     publishReplyRoute({ inReplyTo: 'in-1', channelType: 'discord', platformId: 'chan-9', threadId: 'discord-thread' });
 
     expect(await sendBoth()).toEqual([null, null]);
+  });
+});
+
+describe('add_reaction / edit_message — routing for a message inside a thread', () => {
+  // The user reports emoji reactions work in the main channel but not inside a
+  // thread. Both tools target a previously received message by its seq and read
+  // the target row's stored routing via getRoutingBySeq. This characterizes that
+  // a reaction on an in-thread message carries the full thread id — identical to
+  // the edit path, which the user confirms works in threads.
+  it('a reaction on an in-thread message carries the thread id, identical to an edit', async () => {
+    seedInbound('discord:guild:chan:msg-5', 'discord', 'discord:guild:chan', 'discord:guild:chan:thread-5');
+    const seq = hostSeq; // seedInbound stamps the latest even seq
+
+    const reaction = (await addReaction.handler({ messageId: seq, emoji: 'thumbs_up' })) as { isError?: boolean };
+    const edit = (await editMessage.handler({ messageId: seq, text: 'edited' })) as { isError?: boolean };
+    expect(reaction.isError).toBeUndefined();
+    expect(edit.isError).toBeUndefined();
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(2);
+    const reactionRow = out.find((m) => JSON.parse(m.content).operation === 'reaction')!;
+    const editRow = out.find((m) => JSON.parse(m.content).operation === 'edit')!;
+
+    // The reaction must target the thread the message lives in, not the parent channel.
+    expect(reactionRow.thread_id).toBe('discord:guild:chan:thread-5');
+    expect(reactionRow.channel_type).toBe('discord');
+    expect(reactionRow.platform_id).toBe('discord:guild:chan');
+    expect(JSON.parse(reactionRow.content).messageId).toBe('discord:guild:chan:msg-5');
+
+    // Reaction and edit resolve the SAME routing tuple — if edits reach threads,
+    // reactions must too.
+    expect({
+      thread_id: reactionRow.thread_id,
+      channel_type: reactionRow.channel_type,
+      platform_id: reactionRow.platform_id,
+    }).toEqual({
+      thread_id: editRow.thread_id,
+      channel_type: editRow.channel_type,
+      platform_id: editRow.platform_id,
+    });
+  });
+
+  it('a reaction on a main-channel message carries no thread id', async () => {
+    seedInbound('discord:guild:chan:msg-9', 'discord', 'discord:guild:chan', null);
+    const seq = hostSeq;
+
+    const reaction = (await addReaction.handler({ messageId: seq, emoji: 'heart' })) as { isError?: boolean };
+    expect(reaction.isError).toBeUndefined();
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(out[0].thread_id).toBeNull();
+    expect(out[0].platform_id).toBe('discord:guild:chan');
   });
 });
