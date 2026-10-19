@@ -117,6 +117,62 @@ export function enrichReactionRemoves(adapter: ReturnType<typeof createDiscordAd
   };
 }
 
+/** Discord channel type ids for threads (public / private / announcement). */
+const THREAD_CHANNEL_TYPES = new Set([10, 11, 12]);
+
+/**
+ * Inbound thread reactions: route a reaction placed on a message INSIDE a
+ * thread to that thread's per-thread session, not the parent channel.
+ *
+ * The raw `MESSAGE_REACTION_ADD`/`REMOVE` Gateway payload does NOT carry
+ * `channel_type` (Discord only sends `guild_id`, `channel_id`, `message_id`,
+ * `user_id`/`member`, `emoji`). The vendored adapter's handleForwardedReaction
+ * detects a thread SOLELY from `data.channel_type` (11/12), so with the field
+ * absent it never resolves the thread: it encodes the 3-part
+ * `discord:guild:<channelId>` address (where, inside a thread, `channel_id` is
+ * the THREAD's own id) instead of the 4-part `discord:guild:parent:thread`
+ * that normal in-thread messages carry. The reaction then looks up a message
+ * in a scope that has no session, so nothing routes — the live drop. (Normal
+ * messages route because the MESSAGE_CREATE payload DOES carry `data.thread` /
+ * `channel_type`, so handleForwardedMessage resolves the 4-part id.)
+ *
+ * Fix, entirely in our committed source: when the reaction payload lacks
+ * `channel_type`, fetch the channel once; if it is a thread (a thread type with
+ * a `parent_id`), stamp the real `channel_type` onto the payload so the
+ * adapter's existing thread-resolution branch (and its parent cache) fires and
+ * builds the 4-part thread id. Main-channel reactions are unaffected: a normal
+ * channel reports a non-thread type and the payload is left untouched, so the
+ * 3-part channel id (which already works) is preserved. Defensive: a failed or
+ * ambiguous lookup leaves the payload as-is and never throws, so an inbound
+ * reaction is never worse off than before.
+ */
+export function enrichReactionThreadContext(adapter: ReturnType<typeof createDiscordAdapter>): void {
+  const a = adapter as unknown as {
+    handleForwardedReaction: (data: Record<string, unknown>, added: boolean, options?: unknown) => Promise<void>;
+    discordFetch?: (path: string, method: string, body?: unknown) => Promise<Response>;
+  };
+  const orig = a.handleForwardedReaction.bind(adapter);
+  a.handleForwardedReaction = async (data, added, options) => {
+    if (data.channel_type === undefined && typeof data.channel_id === 'string' && data.channel_id.length > 0) {
+      try {
+        const res = await a.discordFetch?.(`/channels/${data.channel_id}`, 'GET');
+        if (res?.ok) {
+          const channel = (await res.json()) as { type?: number; parent_id?: string | null };
+          // Only a thread (thread type WITH a parent) needs the 4-part id; a
+          // plain channel keeps the 3-part address it already routes with.
+          if (typeof channel.type === 'number' && THREAD_CHANNEL_TYPES.has(channel.type) && channel.parent_id) {
+            data.channel_type = channel.type;
+          }
+        }
+      } catch {
+        // Lookup failed — leave the payload untouched and let the adapter fall
+        // back to the channel address. Never let this throw out of the handler.
+      }
+    }
+    return orig(data, added, options);
+  };
+}
+
 registerChannelAdapter('discord', {
   factory: () => {
     const env = readEnvFile(['DISCORD_BOT_TOKEN', 'DISCORD_PUBLIC_KEY', 'DISCORD_APPLICATION_ID']);
@@ -127,6 +183,7 @@ registerChannelAdapter('discord', {
       applicationId: env.DISCORD_APPLICATION_ID,
     });
     unwrapForwards(discordAdapter);
+    enrichReactionThreadContext(discordAdapter);
     enrichReactionRemoves(discordAdapter);
     return createChatSdkBridge({
       adapter: discordAdapter,
