@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import { closeSessionDb, initTestSessionDb } from './connection.js';
 import { SqliteAgentMailbox } from './index.js';
+import { sqliteGetSeqByPlatformMessageId } from './operations.js';
 
 afterEach(() => closeSessionDb());
 
@@ -125,6 +126,40 @@ describe('SQLite runner mailbox canonical serialization', () => {
         content: '{"text":"reply"}',
       },
     ]);
+  });
+
+  test('resolves a reaction on an agent-authored outbound message to its seq', () => {
+    const { inbound, outbound } = initTestSessionDb();
+    // Inbound user message — reaction on this already works today.
+    inbound
+      .prepare(
+        `INSERT INTO messages_in
+           (id, seq, kind, timestamp, status, trigger, content)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('111222333:agent', 2, 'chat', '2026-01-01 00:00:00', 'pending', 1, '{"text":"hi"}');
+    // Agent's own outbound message with an odd seq, delivered to platform id MSG_OUT.
+    outbound
+      .prepare(
+        `INSERT INTO messages_out
+           (id, seq, timestamp, kind, content)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run('out-1', 3, '2026-01-01 00:00:01', 'chat', '{"text":"reply"}');
+    inbound
+      .prepare(
+        `INSERT INTO delivered
+           (message_out_id, platform_message_id, status, delivered_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run('out-1', '999888777', 'delivered', '2026-01-01 00:00:02');
+
+    // Reaction on the agent's own outbound message resolves via delivered -> messages_out.
+    expect(sqliteGetSeqByPlatformMessageId('999888777')).toBe(3);
+    // Reaction on a stored inbound user message still resolves (no regression).
+    expect(sqliteGetSeqByPlatformMessageId('111222333')).toBe(2);
+    // Unknown snowflake returns null (graceful degradation).
+    expect(sqliteGetSeqByPlatformMessageId('000000000')).toBeNull();
   });
 
   test('skips malformed pending inbound rows instead of crashing the runner', () => {

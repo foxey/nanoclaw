@@ -92,10 +92,20 @@ export function sqliteMarkScriptSkipped(skips: Array<{ id: string; reason: strin
 }
 
 /**
- * Reverse-resolve a platform message snowflake to the internal `seq` of the
- * stored inbound row whose id is `"<snowflake>:<agentGroupId>"` (see host
- * router.ts messageIdForAgent). Returns null when the target isn't stored
- * (older than retained history, or the agent's own just-sent message).
+ * Reverse-resolve a platform message snowflake to the internal `seq`.
+ *
+ * Two cases are handled, inbound first:
+ *   1. A reaction on a USER message — the stored inbound row whose id is
+ *      `"<snowflake>:<agentGroupId>"` (see host router.ts messageIdForAgent).
+ *   2. A reaction on the agent's OWN outbound message — resolved via the
+ *      inverse of `sqliteGetMessageIdBySeq`'s join: the `delivered` row
+ *      (platform_message_id -> message_out_id) in inbound.db, then the
+ *      `messages_out` row (id -> seq) in outbound.db. This is a two-step
+ *      lookup across the two DB files, not a cross-file JOIN.
+ *
+ * Returns null when neither matches (older than retained history, or the
+ * delivery hasn't been marked yet). The formatter then falls back to emitting
+ * `reaction_to_platform` only.
  *
  * Snowflakes are opaque digit strings so normally carry no LIKE
  * metacharacters, but we escape `%`, `_` and the escape char defensively (via
@@ -106,10 +116,22 @@ export function sqliteGetSeqByPlatformMessageId(snowflake: string): number | nul
   const escaped = snowflake.replace(/[\\%_]/g, (ch) => `\\${ch}`);
   const inbound = openInboundDb();
   try {
-    const row = inbound
+    const inboundRow = inbound
       .prepare("SELECT seq FROM messages_in WHERE id LIKE ? ESCAPE '\\' ORDER BY seq ASC LIMIT 1")
       .get(`${escaped}:%`) as { seq: number | null } | undefined;
-    return row?.seq ?? null;
+    if (inboundRow?.seq != null) return inboundRow.seq;
+
+    // Fallback: a reaction on an agent-authored outbound message. The
+    // snowflake is the delivered platform id, so map it back through
+    // delivered -> messages_out to recover the outbound seq.
+    const delivered = inbound
+      .prepare('SELECT message_out_id FROM delivered WHERE platform_message_id = ?')
+      .get(snowflake) as { message_out_id: string } | undefined;
+    if (!delivered) return null;
+    const outboundRow = getOutboundDb()
+      .prepare('SELECT seq FROM messages_out WHERE id = ?')
+      .get(delivered.message_out_id) as { seq: number | null } | undefined;
+    return outboundRow?.seq ?? null;
   } finally {
     inbound.close();
   }
